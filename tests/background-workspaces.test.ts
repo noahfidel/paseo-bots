@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { EMPTY_LIBRARY } from "../shared/bot";
-import { backgroundProbe, ensureBotWorkspace, startBotChat, supportsBackgroundWorkspaces, syncBotWorkspaceTitle, withBackground, withBackgroundFilter, type ChatApi } from "../shared/chat";
+import { backgroundProbe, ensureBotWorkspace, retryUntil, startBotChat, supportsBackgroundWorkspaces, syncBotWorkspaceTitle, withBackground, withBackgroundFilter, type ChatApi } from "../shared/chat";
 import { makeBot } from "./helpers";
 
 beforeEach(() => {
@@ -305,5 +305,37 @@ describe("withBackgroundFilter", () => {
     expect(await withBackground((include) => list(withBackgroundFilter({ includeArchived: true }, include)))).toBe("chats");
     expect(filters.at(-1)).toEqual({ includeArchived: true });
     expect(filters[0]).toEqual({ includeArchived: true, includeBackground: true });
+  });
+});
+
+describe("retryUntil", () => {
+  it("tries again after a failure, such as a reconnect, until the task works", async () => {
+    let attempts = 0;
+    const result = await retryUntil(
+      async () => {
+        if (++attempts < 3) throw new Error("Paseo is reconnecting. Try again in a moment.");
+        return "subscribed";
+      },
+      () => false,
+      [0, 0],
+    );
+    expect(result).toBe("subscribed");
+    expect(attempts).toBe(3);
+  });
+
+  it("stops trying once told to, without a result", async () => {
+    let attempts = 0;
+    let stop = false;
+    const result = await retryUntil(
+      async () => {
+        attempts++;
+        stop = true;
+        throw new Error("down");
+      },
+      () => stop,
+      [0],
+    );
+    expect(result).toBeUndefined();
+    expect(attempts).toBe(1);
   });
 });

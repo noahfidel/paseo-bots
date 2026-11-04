@@ -108,6 +108,21 @@ export async function withBackground<T>(call: (includeBackground: boolean) => Pr
   }
 }
 
+/**
+ * Runs `task` until it works, waiting `delays` between tries (the last delay repeats), and
+ * stops with no result once `stopped()` says so. For work that must outlive a reconnect.
+ */
+export async function retryUntil<T>(task: () => Promise<T>, stopped: () => boolean, delays: readonly number[]): Promise<T | undefined> {
+  for (let attempt = 0; !stopped(); attempt++) {
+    try {
+      return await task();
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, delays[Math.min(attempt, delays.length - 1)] ?? 0));
+    }
+  }
+  return undefined;
+}
+
 /** An agent filter that also matches chats in background workspaces, for hosts that support them. */
 export function withBackgroundFilter<F extends object>(filter: F, includeBackground: boolean): F | (F & { includeBackground: true }) {
   return includeBackground ? { ...filter, includeBackground: true } : filter;

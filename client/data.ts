@@ -3,7 +3,7 @@ import type { PaseoAgent, PaseoApi } from "./paseo";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
 import { BOT_LABEL } from "../shared/bot";
-import { supportsBackgroundWorkspaces, withBackground, withBackgroundFilter } from "../shared/chat";
+import { retryUntil, supportsBackgroundWorkspaces, withBackground, withBackgroundFilter } from "../shared/chat";
 import { paseoToolsState, type PaseoToolsConfig } from "../shared/paseo-tools";
 
 export interface LocalHost {
@@ -150,12 +150,16 @@ export function useChatInvalidation() {
       }, 500);
     });
     // The daemon only sends agent updates to sessions that subscribed through a list request.
-    void withBackground((includeBackground) => paseo.agents.list({ page: { limit: 1 }, subscribe: {}, ...(includeBackground ? { includeBackground: true } : {}) }), paseo)
-      .then((result) => {
-        if (closed) void result.subscription.release();
-        else subscription = result.subscription;
-      })
-      .catch(() => {});
+    // A reconnect makes this fail for a while; keep trying so live updates come back.
+    void retryUntil(
+      () => withBackground((includeBackground) => paseo.agents.list({ page: { limit: 1 }, subscribe: {}, ...(includeBackground ? { includeBackground: true } : {}) }), paseo),
+      () => closed,
+      [1_000, 2_000, 5_000, 15_000],
+    ).then((result) => {
+      if (!result) return;
+      if (closed) void result.subscription.release();
+      else subscription = result.subscription;
+    });
     return () => {
       closed = true;
       if (timer) clearTimeout(timer);
