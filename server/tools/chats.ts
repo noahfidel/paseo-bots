@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { matchesAll, parseSince, searchWords, snippet, whenLabel } from "../../shared/activity";
 import { BOT_LABEL } from "../../shared/bot";
+import { withBackground, withBackgroundFilter } from "../../shared/chat";
 import { memoryTexts } from "../memory";
 import { defineTool } from "./mcp";
 
@@ -41,11 +42,14 @@ export const searchChats = defineTool({
 
     const hits: Hit[] = [];
     const paseo = host.requirePaseo();
-    const chats = await paseo.agents.list({
-      filter: { labels: { [BOT_LABEL]: bot.id }, includeArchived: true },
-      sort: [{ key: "updated_at", direction: "desc" }],
-      page: { limit: MAX_CHATS },
-    });
+    // Chats in background workspaces only come back when asked for.
+    const chats = await withBackground((includeBackground) =>
+      paseo.agents.list({
+        filter: withBackgroundFilter({ labels: { [BOT_LABEL]: bot.id }, includeArchived: true }, includeBackground),
+        sort: [{ key: "updated_at", direction: "desc" }],
+        page: { limit: MAX_CHATS },
+      }),
+    );
     for (const { agent } of chats.entries) {
       if (agent.id === agentId || hits.length >= limit) continue;
       if (from !== null && Date.parse(agent.updatedAt) < from) continue;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EMPTY_LIBRARY } from "../shared/bot";
-import { ensureBotWorkspace, startBotChat, supportsBackgroundWorkspaces, syncBotWorkspaceTitle, withBackground, type ChatApi } from "../shared/chat";
+import { ensureBotWorkspace, startBotChat, supportsBackgroundWorkspaces, syncBotWorkspaceTitle, withBackground, withBackgroundFilter, type ChatApi } from "../shared/chat";
 import { makeBot } from "./helpers";
 
 const OLD_HOST = "Update the host to use background workspaces.";
@@ -220,5 +220,24 @@ describe("supportsBackgroundWorkspaces", () => {
   });
   it("is false on an old host", async () => {
     expect(await supportsBackgroundWorkspaces(fakeApi({ oldHost: true }).api)).toBe(false);
+  });
+});
+
+describe("withBackgroundFilter", () => {
+  it("adds includeBackground to an agent filter when asked, so chats in hidden workspaces are listed", () => {
+    expect(withBackgroundFilter({ labels: { a: "b" } }, true)).toEqual({ labels: { a: "b" }, includeBackground: true });
+  });
+  it("leaves the filter as it was for a host that doesn't know the option", () => {
+    expect(withBackgroundFilter({ labels: { a: "b" } }, false)).toEqual({ labels: { a: "b" } });
+  });
+  it("retries a chat listing without the option on an old host", async () => {
+    const filters: unknown[] = [];
+    const list = async (filter: object) => {
+      filters.push(filter);
+      if ("includeBackground" in filter) throw new Error(OLD_HOST);
+      return "chats";
+    };
+    expect(await withBackground((include) => list(withBackgroundFilter({ includeArchived: true }, include)))).toBe("chats");
+    expect(filters).toEqual([{ includeArchived: true, includeBackground: true }, { includeArchived: true }]);
   });
 });

@@ -82,6 +82,11 @@ export async function withBackground<T>(call: (includeBackground: boolean) => Pr
   }
 }
 
+/** An agent filter that also matches chats in background workspaces, for hosts that support them. */
+export function withBackgroundFilter<F extends object>(filter: F, includeBackground: boolean): F | (F & { includeBackground: true }) {
+  return includeBackground ? { ...filter, includeBackground: true } : filter;
+}
+
 /** Lists workspaces including background ones where the host supports them. */
 export function listWorkspaces(api: ChatApi): Promise<{ entries: ChatWorkspace[]; backgroundSupported: boolean }> {
   return withBackground(async (includeBackground) => {
