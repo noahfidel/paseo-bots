@@ -16,13 +16,15 @@ export async function startChat(host: BotsHost, relay: Relay, bot: Bot, input: {
   if (bot.hostId) throw new Error(`${bot.name} runs on another host, so its chats can't be started from here.`);
   const library = await host.library();
   const home = await ensureBotHome({ botId: bot.id });
-  const { systemPrompt: system } = await systemPrompt({ bot, local: true, message: input.prompt }, library, paseo, await host.values());
+  const values = await host.values();
+  const { systemPrompt: system } = await systemPrompt({ bot, local: true, message: input.prompt }, library, paseo, values);
   const agentId = newUuid();
   return startBotChat(paseo, {
     bot,
     library,
     agentId,
     plugin: { tools: await relay.mountTools(bot.id, agentId), apps: bot.apps.length ? await relay.mountApps(bot.id) : null },
+    hideFromSidebar: values?.hideBotChats === true,
     placement: bot.cwd ? { path: bot.cwd, projectRoot: null } : { path: home.path, projectRoot: home.root },
     prompt: input.prompt,
     systemPrompt: system,

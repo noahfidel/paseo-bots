@@ -562,6 +562,7 @@ function BotsSurfaceContent({ theme, layout, host, navigation }: PluginSurfacePr
         colors={colors}
         bot={selectedBot}
         library={library}
+        hideFromSidebar={settings.values.hideBotChats === true}
         selection={selection}
         localHost={localHost}
         panelOpen={panel.open}
@@ -731,6 +732,8 @@ interface SelectedChatProps {
   colors: Colors;
   bot: Bot;
   library: Library;
+  /** The "Hide bot chats from Paseo's sidebar" setting. */
+  hideFromSidebar: boolean;
   selection: Selection;
   localHost: LocalHost;
   panelOpen: boolean;
@@ -743,7 +746,7 @@ interface SelectedChatProps {
   onStarted(chatId: string): void;
 }
 
-function SelectedChat({ colors, bot, library, selection, localHost, panelOpen, layout, keyboardOpen, typeVersion, onBack, onBotMenu, onTogglePanel, onStarted }: SelectedChatProps) {
+function SelectedChat({ colors, bot, library, hideFromSidebar, selection, localHost, panelOpen, layout, keyboardOpen, typeVersion, onBack, onBotMenu, onTogglePanel, onStarted }: SelectedChatProps) {
   const host = useBotHost(bot.hostId, localHost);
   const chat = useChat(host.api, selection.chatId);
   const ensureHome = useRpc(ensureBotHomeRpc);
@@ -767,6 +770,7 @@ function SelectedChat({ colors, bot, library, selection, localHost, panelOpen, l
       ...(host.isLocal ? { agentId } : {}),
       plugin,
       placement,
+      hideFromSidebar,
       prompt: message.text,
       systemPrompt,
       images: message.images,

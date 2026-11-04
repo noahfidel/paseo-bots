@@ -169,6 +169,11 @@ describe("settings schema", () => {
     const bots = BOT_TEMPLATES.map((template) => bot({ id: template.id, name: template.name, title: template.title, soul: template.soul }));
     expect(botSettings.schema.parse({ bots }).bots).toHaveLength(BOT_TEMPLATES.length);
   });
+
+  it("leaves bot chats in Paseo's sidebar unless the setting is on", () => {
+    expect(botSettings.schema.parse({}).hideBotChats).toBeUndefined();
+    expect(botSettings.schema.parse({ hideBotChats: true }).hideBotChats).toBe(true);
+  });
 });
 
 describe("migrateV2", () => {

@@ -2,8 +2,10 @@ import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { copyText, useToast } from "@getpaseo/plugin/client/react-native";
 import { SettingsAction, SettingsCard, SettingsSection, SettingsSelect, SettingsSwitch } from "@getpaseo/plugin/client/ui";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { DEFAULT_BOT_DEFAULTS, type Bot, type BotDefaults, type BotGroup } from "../../shared/bot";
+import { supportsBackgroundWorkspaces } from "../../shared/chat";
 import { addImportedBots } from "../../shared/library";
 import { exportTeamRpc, importTeamRpc } from "../../shared/rpc";
 import { useBotHost, useProviders } from "../data";
@@ -26,6 +28,12 @@ export function BotsSettings({ theme, host }: PluginSurfaceProps) {
         defaults={values.defaults ?? DEFAULT_BOT_DEFAULTS}
         onChange={(patch) => void commit((current) => ({ ...current, defaults: { ...(current.defaults ?? DEFAULT_BOT_DEFAULTS), ...patch } }))}
       />
+      <SidebarSection
+        host={host}
+        hidden={values.hideBotChats === true}
+        onChange={(hideBotChats) => void commit((current) => ({ ...current, hideBotChats }))}
+        colors={colors}
+      />
       <SettingsSection title="Presets" info="Bots you saved with Save as preset in their menu: their identity, instructions, playbooks and skills. They're listed under New bot.">
         <SettingsCard>
           {(values.presets ?? []).length === 0 ? <CardNote colors={colors} text="No presets yet" /> : null}
@@ -46,6 +54,32 @@ export function BotsSettings({ theme, host }: PluginSurfaceProps) {
       </SettingsSection>
       <TeamSection colors={colors} bots={values.bots.filter((bot) => !bot.archived)} groups={values.groups ?? []} commit={commit} />
     </>
+  );
+}
+
+/** Whether bot chats stay out of Paseo's own sidebar; needs a host that has background workspaces. */
+function SidebarSection({ host, hidden, onChange, colors }: { host: PluginSurfaceProps["host"]; hidden: boolean; onChange(hidden: boolean): void; colors: Colors }) {
+  const api = useBotHost(null, { id: host.id, label: host.label }).api;
+  const support = useQuery({
+    queryKey: ["paseo-bots", "background-support", host.id],
+    enabled: !!api,
+    staleTime: 60_000,
+    queryFn: () => supportsBackgroundWorkspaces(api!),
+  });
+  const unsupported = support.data === false;
+  return (
+    <SettingsSection title="Paseo sidebar" info="Bot chats are still listed in the Bots screen.">
+      <SettingsCard>
+        <SettingsSwitch
+          label="Hide bot chats from Paseo's sidebar"
+          hint="New bot chats open in background workspaces, which Paseo keeps out of its sidebar. Background chats may not send Paseo notifications or open tabs. Existing chats stay where they are."
+          value={hidden}
+          disabled={unsupported}
+          onValueChange={onChange}
+        />
+        {unsupported ? <CardNote colors={colors} text="This host's Paseo is older than 0.13.2 and has no background workspaces, so bot chats stay in Paseo's sidebar. Update Paseo to use this setting." /> : null}
+      </SettingsCard>
+    </SettingsSection>
   );
 }
 

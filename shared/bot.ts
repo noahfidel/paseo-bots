@@ -295,6 +295,8 @@ export const botSettings = defineSettings({
     defaults: BotDefaultsSchema.optional(),
     presets: z.array(PresetSchema).optional(),
     groups: z.array(BotGroupSchema).optional(),
+    /** Keep bot chats out of Paseo's own sidebar by giving bots background workspaces. Off when missing. */
+    hideBotChats: z.boolean().optional(),
   }),
   migrate: (values, fromVersion) => {
     let migrated = values;

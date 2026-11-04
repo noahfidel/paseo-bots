@@ -71,6 +71,8 @@ Bots can propose routines too: ask in a chat, then press **Create routine** on t
 
 With teams, the Bots screen gets a tab for each team, and **Other bots** for bots without one (a menu on phones); **+** next to the tabs adds a team, and right-clicking a tab edits it. A team file carries your bots and their teams: find it in **Settings → Plugins**, under **Bots** in the paseo-bots menu.
 
+To keep bot chats out of Paseo's own sidebar, turn on **Hide bot chats from Paseo's sidebar** under **Settings → Plugins → Bots → Paseo sidebar**. New chats then open in Paseo background workspaces, and the Bots screen still lists them. Background chats may not send Paseo notifications or open tabs, and the setting needs Paseo 0.13.2 or later. Chats that already exist stay where they are; a bot that had a normal workspace gets a new background one, and the old one is left for you to archive.
+
 Whether a bot may ask others for help is set in its settings under **Permissions → Contact other bots**: **Ask first**, **Allowed** or **Off**.
 
 ### Skills & Tools
