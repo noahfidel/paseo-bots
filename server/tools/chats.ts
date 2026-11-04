@@ -49,6 +49,7 @@ export const searchChats = defineTool({
         sort: [{ key: "updated_at", direction: "desc" }],
         page: { limit: MAX_CHATS },
       }),
+      paseo,
     );
     for (const { agent } of chats.entries) {
       if (agent.id === agentId || hits.length >= limit) continue;

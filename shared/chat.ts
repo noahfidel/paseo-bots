@@ -64,21 +64,47 @@ export interface ChatApi {
   readonly providers: { snapshot(): Promise<{ entries: { provider: string; models?: { id: string; isDefault?: boolean; isSelectable?: boolean }[] }[] }> };
 }
 
-/** What a host older than 0.13.2 says when asked for background workspaces. */
+/** What the client says when the host hasn't reported background support: a host older than 0.13.2, or a connection that is still (re)connecting. */
 const BACKGROUND_UNSUPPORTED = /background workspaces/i;
+const isUnsupported = (error: unknown) => BACKGROUND_UNSUPPORTED.test(error instanceof Error ? error.message : String(error));
+
+/** Hosts (by their API object) that have answered a background call, and hosts that stayed silent through the waits. */
+const supportSeen = new WeakSet<object>();
+const knownOld = new WeakSet<object>();
+
+/** How long to wait between tries when the host says it has no background support, before believing it. Tests shorten it. */
+export const backgroundProbe = { delays: [300, 600, 1200] };
 
 /**
  * Runs a Paseo call that can include background workspaces, asking for them
- * first and retrying without when the host is too old to know about them.
- * Hidden workspaces are Paseo's to hide from its sidebar, not from us: every
- * lookup must see them, or a bot would get a second workspace.
+ * first. The client reports "no background support" both on a host older than
+ * 0.13.2 and while it is still connecting (it forgets the host's version on every
+ * reconnect), so that answer is retried a few times before it is believed, and a
+ * host that has already answered once is never treated as old. Only a host that
+ * stays silent gets the plain call, so pass the API as `key` to remember what a
+ * host has shown. Hidden workspaces are Paseo's to hide from its sidebar, not
+ * from us: every lookup must see them, or a bot would get a second workspace.
  */
-export async function withBackground<T>(call: (includeBackground: boolean) => Promise<T>): Promise<T> {
-  try {
-    return await call(true);
-  } catch (error) {
-    if (!BACKGROUND_UNSUPPORTED.test(error instanceof Error ? error.message : String(error))) throw error;
-    return call(false);
+export async function withBackground<T>(call: (includeBackground: boolean) => Promise<T>, key?: object): Promise<T> {
+  const delays = key && knownOld.has(key) ? [] : backgroundProbe.delays;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const result = await call(true);
+      if (key) {
+        supportSeen.add(key);
+        knownOld.delete(key);
+      }
+      return result;
+    } catch (error) {
+      if (!isUnsupported(error)) throw error;
+      const delay = delays[attempt];
+      if (delay === undefined) {
+        if (key && supportSeen.has(key)) throw new Error("Paseo is reconnecting. Try again in a moment.");
+        if (key) knownOld.add(key);
+        return call(false);
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
   }
 }
 
@@ -92,18 +118,15 @@ export function listWorkspaces(api: ChatApi): Promise<{ entries: ChatWorkspace[]
   return withBackground(async (includeBackground) => {
     const { entries } = await (includeBackground ? api.workspaces.list({ filter: { includeBackground: true } }) : api.workspaces.list());
     return { entries, backgroundSupported: includeBackground };
-  });
+  }, api);
 }
 
 /** Whether the host can keep workspaces out of Paseo's sidebar (Paseo 0.13.2 and later). */
-export async function supportsBackgroundWorkspaces(api: ChatApi): Promise<boolean> {
-  try {
-    await api.workspaces.list({ filter: { includeBackground: true } });
-    return true;
-  } catch (error) {
-    if (BACKGROUND_UNSUPPORTED.test(error instanceof Error ? error.message : String(error))) return false;
-    throw error;
-  }
+export function supportsBackgroundWorkspaces(api: ChatApi): Promise<boolean> {
+  return withBackground(async (includeBackground) => {
+    if (includeBackground) await api.workspaces.list({ filter: { includeBackground: true } });
+    return includeBackground;
+  }, api);
 }
 
 /**
@@ -116,10 +139,6 @@ async function botsProjectId(api: ChatApi, root: string): Promise<string> {
   const { projects } = await api.projects.list();
   const existing = projects.find((project) => normalize(project.projectRootPath) === normalize(root));
   if (existing) return existing.projectId;
-  // Once every bot workspace is in the background the project list may not show the project, and opening the folder again would make a second root workspace.
-  const { entries } = await listWorkspaces(api);
-  const hidden = entries.find((workspace) => normalize(workspace.projectRootPath) === normalize(root));
-  if (hidden) return hidden.projectId;
   const rootWorkspace = await api.workspaces.open(root);
   const snapshot = rootWorkspace.current() ?? (await rootWorkspace.refresh());
   if (!snapshot) throw new Error("Paseo didn't register the Bots project.");
@@ -140,10 +159,29 @@ function isBotWorkspace(workspace: ChatWorkspace, bot: Bot, placement: BotPlacem
  * setting was on) gets a new background workspace, and the visible one is left as it is. With `hide` off a
  * visible workspace is preferred, but an existing background one is still used rather than duplicated.
  */
-export async function ensureBotWorkspace(api: ChatApi, bot: Bot, placement: BotPlacement, hide = false) {
+export function ensureBotWorkspace(api: ChatApi, bot: Bot, placement: BotPlacement, hide = false) {
+  return serialized(bot.id, () => findOrCreateBotWorkspace(api, bot, placement, hide));
+}
+
+/** One lookup-and-create at a time per bot in this process, so two chats starting together can't each create a workspace. */
+const botLocks = new Map<string, Promise<unknown>>();
+function serialized<T>(key: string, task: () => Promise<T>): Promise<T> {
+  const run = (botLocks.get(key) ?? Promise.resolve()).then(task);
+  const tail = run.catch(() => undefined);
+  botLocks.set(key, tail);
+  void tail.then(() => {
+    if (botLocks.get(key) === tail) botLocks.delete(key);
+  });
+  return run;
+}
+
+async function findOrCreateBotWorkspace(api: ChatApi, bot: Bot, placement: BotPlacement, hide: boolean) {
   const { entries, backgroundSupported } = await listWorkspaces(api);
-  // A host without background workspaces has none to prefer, so the visible one is used as before.
-  const wantBackground = hide && backgroundSupported;
+  if (hide && !backgroundSupported) {
+    // Never fall back to a visible workspace here: this may be a reconnect, and a duplicate would split the bot's chats.
+    throw new Error("Paseo on this host can't keep chats out of its sidebar: it needs Paseo 0.13.2 or later, or it's still connecting. Try again, or turn off \"Hide bot chats from Paseo's sidebar\" in the Bots settings.");
+  }
+  const wantBackground = hide;
   const matches = entries.filter((workspace) => isBotWorkspace(workspace, bot, placement));
   const background = matches.find((workspace) => workspace.background === true);
   const visible = matches.find((workspace) => workspace.background !== true);
@@ -155,15 +193,7 @@ export async function ensureBotWorkspace(api: ChatApi, bot: Bot, placement: BotP
   }
   const projectId = placement.projectRoot ? await botsProjectId(api, placement.projectRoot) : undefined;
   const source = { kind: "directory" as const, path: placement.path, ...(projectId ? { projectId } : {}) };
-  if (wantBackground) {
-    try {
-      return await api.workspaces.create({ title: bot.name, background: true, source });
-    } catch (error) {
-      // An older host still gets its chat, in a visible workspace.
-      if (!BACKGROUND_UNSUPPORTED.test(error instanceof Error ? error.message : String(error))) throw error;
-    }
-  }
-  return api.workspaces.create({ title: bot.name, source });
+  return api.workspaces.create({ title: bot.name, ...(wantBackground ? { background: true } : {}), source });
 }
 
 /** Renames the bot's workspaces after the bot is renamed; does nothing if there are none yet. */

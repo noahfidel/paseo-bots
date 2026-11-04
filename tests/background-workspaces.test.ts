@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { EMPTY_LIBRARY } from "../shared/bot";
-import { ensureBotWorkspace, startBotChat, supportsBackgroundWorkspaces, syncBotWorkspaceTitle, withBackground, withBackgroundFilter, type ChatApi } from "../shared/chat";
+import { backgroundProbe, ensureBotWorkspace, startBotChat, supportsBackgroundWorkspaces, syncBotWorkspaceTitle, withBackground, withBackgroundFilter, type ChatApi } from "../shared/chat";
 import { makeBot } from "./helpers";
+
+beforeEach(() => {
+  backgroundProbe.delays = [0, 0];
+});
 
 const OLD_HOST = "Update the host to use background workspaces.";
 const SHARED = { path: "/bots/inbox", projectRoot: "/bots" };
@@ -17,8 +21,9 @@ interface Entry {
 }
 
 /** An in-memory Paseo that behaves like the real one: background workspaces are hidden unless asked for, and an old host rejects both ways of asking. */
-function fakeApi(options: { entries?: Entry[]; projects?: { projectId: string; projectRootPath: string }[]; oldHost?: boolean; hideBackgroundProjects?: boolean } = {}) {
+function fakeApi(options: { entries?: Entry[]; projects?: { projectId: string; projectRootPath: string }[]; oldHost?: boolean; slowCreate?: boolean; reconnectingFor?: number } = {}) {
   const entries: Entry[] = [...(options.entries ?? [])];
+  let reconnecting = options.reconnectingFor ?? 0;
   const calls = { list: [] as unknown[], create: [] as { background?: boolean; title: string; source: { path: string; projectId?: string } }[], titles: [] as string[], opened: [] as string[], agents: [] as string[] };
   const handle = (entry: Entry) => ({
     current: () => entry,
@@ -37,15 +42,17 @@ function fakeApi(options: { entries?: Entry[]; projects?: { projectId: string; p
   const api: ChatApi = {
     projects: {
       list: async () => {
-        const known = new Set(entries.filter((entry) => !(options.hideBackgroundProjects && entry.background)).map((entry) => entry.projectId));
-        return { projects: (options.projects ?? []).filter((project) => known.has(project.projectId) || !options.hideBackgroundProjects) as never };
+        return { projects: (options.projects ?? []) as never };
       },
     },
     workspaces: {
       list: async (listOptions) => {
         calls.list.push(listOptions ?? null);
         const wantsBackground = listOptions?.filter?.includeBackground === true;
-        if (wantsBackground && options.oldHost) throw new Error(OLD_HOST);
+        if (wantsBackground && (options.oldHost || reconnecting > 0)) {
+          reconnecting -= 1;
+          throw new Error(OLD_HOST);
+        }
         return { entries: entries.filter((entry) => wantsBackground || !entry.background) as never };
       },
       ref: (workspace) => handle(typeof workspace === "string" ? entries.find((entry) => entry.id === workspace)! : (workspace as Entry)),
@@ -58,6 +65,7 @@ function fakeApi(options: { entries?: Entry[]; projects?: { projectId: string; p
       create: async (create) => {
         if (create.background !== undefined && options.oldHost) throw new Error(OLD_HOST);
         calls.create.push(create);
+        if (options.slowCreate) await new Promise((resolve) => setTimeout(resolve, 20));
         const entry: Entry = {
           id: `ws-${entries.length}`,
           projectId: create.source.projectId ?? "p-custom",
@@ -141,13 +149,6 @@ describe("ensureBotWorkspace", () => {
     expect(calls.list[0]).toEqual({ filter: { includeBackground: true } });
   });
 
-  it("finds the Bots project through its background workspaces when the project list leaves it out", async () => {
-    const { api, calls } = fakeApi({ entries: [{ ...backgroundInbox, workspaceDirectory: "/bots/other", title: "Other" }], projects, hideBackgroundProjects: true });
-    await ensureBotWorkspace(api, makeBot(), SHARED, true);
-    expect(calls.opened).toEqual([]);
-    expect(calls.create[0]?.source.projectId).toBe("p1");
-  });
-
   it("matches a custom-folder bot by title and leaves other workspaces in that folder alone", async () => {
     const other: Entry = { id: "other", projectId: "p2", projectRootPath: "/home/me/.claude", workspaceDirectory: "/home/me/.claude", title: "Something else" };
     const { api, calls } = fakeApi({ entries: [other] });
@@ -159,13 +160,64 @@ describe("ensureBotWorkspace", () => {
     expect(calls.titles).toEqual([]);
   });
 
-  it("falls back to a normal workspace on a host without background support", async () => {
+  it("fails with a clear error on a host without background support instead of creating a visible workspace", async () => {
     const { api, calls } = fakeApi({ projects, oldHost: true });
-    await ensureBotWorkspace(api, makeBot(), SHARED, true);
+    await expect(ensureBotWorkspace(api, makeBot(), SHARED, true)).rejects.toThrow(/0\.13\.2/);
+    expect(calls.create).toHaveLength(0);
+  });
+
+  it("still works as before on a host without background support when the setting is off", async () => {
+    const { api, calls } = fakeApi({ projects, oldHost: true });
+    await ensureBotWorkspace(api, makeBot(), SHARED, false);
+    await ensureBotWorkspace(api, makeBot(), SHARED, false);
     expect(calls.create).toHaveLength(1);
     expect(calls.create[0]).not.toHaveProperty("background");
-    // And the lookup itself fell back to a plain list, so an existing workspace is still found.
-    await ensureBotWorkspace(api, makeBot(), SHARED, true);
+  });
+
+  it("does not mistake a reconnect for an old host: waits, then finds the hidden workspace and creates nothing", async () => {
+    const { api, calls } = fakeApi({ entries: [backgroundInbox], projects, reconnectingFor: 2 });
+    const workspace = await ensureBotWorkspace(api, makeBot(), SHARED, true);
+    expect(workspace.current()?.id).toBe("hidden");
+    expect(calls.create).toHaveLength(0);
+  });
+
+  it("never downgrades once the host has been seen supporting background workspaces", async () => {
+    const fake = fakeApi({ entries: [backgroundInbox], projects });
+    await ensureBotWorkspace(fake.api, makeBot(), SHARED, true);
+    // The connection drops for longer than the wait: the chat fails instead of listing without hidden workspaces.
+    const seen = fake.api;
+    let failing = true;
+    const original = seen.workspaces.list;
+    seen.workspaces.list = async (options) => {
+      if (failing && options?.filter?.includeBackground) throw new Error(OLD_HOST);
+      return original(options);
+    };
+    await expect(ensureBotWorkspace(seen, makeBot(), SHARED, true)).rejects.toThrow();
+    expect(fake.calls.create).toHaveLength(0);
+    failing = false;
+    await ensureBotWorkspace(seen, makeBot(), SHARED, true);
+    expect(fake.calls.create).toHaveLength(0);
+  });
+
+  it("does not create two workspaces when two chats start for the same bot at once", async () => {
+    const { api, calls } = fakeApi({ projects, slowCreate: true });
+    await Promise.all([ensureBotWorkspace(api, makeBot(), SHARED, true), ensureBotWorkspace(api, makeBot(), SHARED, true)]);
+    expect(calls.create).toHaveLength(1);
+  });
+
+  it("lets different bots start at the same time", async () => {
+    const { api, calls } = fakeApi({ projects, slowCreate: true });
+    await Promise.all([
+      ensureBotWorkspace(api, makeBot({ id: "a", name: "A" }), { path: "/bots/a", projectRoot: "/bots" }, true),
+      ensureBotWorkspace(api, makeBot({ id: "b", name: "B" }), { path: "/bots/b", projectRoot: "/bots" }, true),
+    ]);
+    expect(calls.create).toHaveLength(2);
+  });
+
+  it("keeps going after a failed start", async () => {
+    const { api, calls } = fakeApi({ projects, oldHost: true });
+    await expect(ensureBotWorkspace(api, makeBot(), SHARED, true)).rejects.toThrow();
+    await ensureBotWorkspace(api, makeBot(), SHARED, false);
     expect(calls.create).toHaveLength(1);
   });
 });
@@ -178,9 +230,9 @@ describe("startBotChat", () => {
     expect(id).toMatch(/^agent-in-/);
   });
 
-  it("still starts the chat on an old host", async () => {
+  it("still starts the chat on an old host when the setting is off", async () => {
     const { api } = fakeApi({ projects, oldHost: true });
-    const id = await startBotChat(api, { bot: makeBot({ model: "m" }), library: EMPTY_LIBRARY, placement: SHARED, prompt: "hi", systemPrompt: "s", hideFromSidebar: true });
+    const id = await startBotChat(api, { bot: makeBot({ model: "m" }), library: EMPTY_LIBRARY, placement: SHARED, prompt: "hi", systemPrompt: "s" });
     expect(id).toMatch(/^agent-in-/);
   });
 });
@@ -195,6 +247,7 @@ describe("syncBotWorkspaceTitle", () => {
 
 describe("withBackground", () => {
   it("asks for background workspaces first and retries without them on an old host", async () => {
+    backgroundProbe.delays = [];
     const asked: boolean[] = [];
     const result = await withBackground(async (includeBackground) => {
       asked.push(includeBackground);
@@ -203,6 +256,18 @@ describe("withBackground", () => {
     });
     expect(result).toBe("plain");
     expect(asked).toEqual([true, false]);
+  });
+
+  it("waits out a reconnect: a guard error that clears is retried with background workspaces, never downgraded", async () => {
+    let failures = 2;
+    const asked: boolean[] = [];
+    const result = await withBackground(async (includeBackground) => {
+      asked.push(includeBackground);
+      if (includeBackground && failures-- > 0) throw new Error(OLD_HOST);
+      return "ok";
+    });
+    expect(result).toBe("ok");
+    expect(asked).toEqual([true, true, true]);
   });
 
   it("passes other errors through", async () => {
@@ -238,6 +303,7 @@ describe("withBackgroundFilter", () => {
       return "chats";
     };
     expect(await withBackground((include) => list(withBackgroundFilter({ includeArchived: true }, include)))).toBe("chats");
-    expect(filters).toEqual([{ includeArchived: true, includeBackground: true }, { includeArchived: true }]);
+    expect(filters.at(-1)).toEqual({ includeArchived: true });
+    expect(filters[0]).toEqual({ includeArchived: true, includeBackground: true });
   });
 });
