@@ -42,6 +42,13 @@ export class BotsHost {
     return state.status === "ready" ? state.values : null;
   }
 
+  /** The "hide bot chats" setting. Fails while settings aren't ready: reading that as off would put the chat in a visible workspace. */
+  async hideBotChats(): Promise<boolean> {
+    const values = await this.values();
+    if (!values) throw new Error("The bots settings aren't ready yet, so this chat can't be placed. Try again in a moment.");
+    return values.hideBotChats === true;
+  }
+
   async library(): Promise<Library> {
     return (await this.values())?.library ?? EMPTY_LIBRARY;
   }

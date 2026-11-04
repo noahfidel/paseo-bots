@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildAgentConfig, EMPTY_LIBRARY } from "../shared/bot";
 import { fakeHost, makeBot } from "./helpers";
+import { BotsHost } from "../server/host";
 
 const started: { botId: string; prompt: string; title: string; labels: Record<string, string> }[] = [];
 vi.mock("../server/chats", () => ({
@@ -100,5 +101,19 @@ describe("asking other bots", () => {
     expect(granted("allow")).toContain("ask_bot");
     expect(granted("ask")).not.toContain("ask_bot");
     expect(granted("ask")).toContain("check_chat");
+  });
+});
+
+describe("hideBotChats", () => {
+  const hostWith = (state: unknown) => new BotsHost({ read: async () => state } as never);
+
+  it("reads the setting when settings are ready", async () => {
+    expect(await hostWith({ status: "ready", revision: "1", values: { bots: [], history: [], hideBotChats: true } }).hideBotChats()).toBe(true);
+    expect(await hostWith({ status: "ready", revision: "1", values: { bots: [], history: [] } }).hideBotChats()).toBe(false);
+  });
+
+  it("fails rather than reading the setting as off while settings aren't ready", async () => {
+    await expect(hostWith({ status: "loading" }).hideBotChats()).rejects.toThrow(/settings/i);
+    await expect(hostWith({ status: "invalid" }).hideBotChats()).rejects.toThrow(/settings/i);
   });
 });

@@ -18,13 +18,14 @@ export async function startChat(host: BotsHost, relay: Relay, bot: Bot, input: {
   const home = await ensureBotHome({ botId: bot.id });
   const values = await host.values();
   const { systemPrompt: system } = await systemPrompt({ bot, local: true, message: input.prompt }, library, paseo, values);
+  const hideFromSidebar = await host.hideBotChats();
   const agentId = newUuid();
   return startBotChat(paseo, {
     bot,
     library,
     agentId,
     plugin: { tools: await relay.mountTools(bot.id, agentId), apps: bot.apps.length ? await relay.mountApps(bot.id) : null },
-    hideFromSidebar: values?.hideBotChats === true,
+    hideFromSidebar,
     placement: bot.cwd ? { path: bot.cwd, projectRoot: null } : { path: home.path, projectRoot: home.root },
     prompt: input.prompt,
     systemPrompt: system,
