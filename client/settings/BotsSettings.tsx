@@ -2,13 +2,11 @@ import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { copyText, useToast } from "@getpaseo/plugin/client/react-native";
 import { SettingsAction, SettingsCard, SettingsSection, SettingsSelect, SettingsSwitch } from "@getpaseo/plugin/client/ui";
-import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { DEFAULT_BOT_DEFAULTS, type Bot, type BotDefaults, type BotGroup } from "../../shared/bot";
-import { supportsBackgroundWorkspaces } from "../../shared/chat";
 import { addImportedBots } from "../../shared/library";
 import { exportTeamRpc, importTeamRpc } from "../../shared/rpc";
-import { useBotHost, useProviders } from "../data";
+import { useBackgroundSupport, useBotHost, useProviders } from "../data";
 import { confirmDialog, errorText } from "../native";
 import { Button, CardNote, FormTextArea, SheetActions } from "../panel/controls";
 import { useBotSettings } from "../useBotSettings";
@@ -59,14 +57,7 @@ export function BotsSettings({ theme, host }: PluginSurfaceProps) {
 
 /** Whether bot chats stay out of Paseo's own sidebar; needs a host that has background workspaces. */
 function SidebarSection({ host, hidden, onChange, colors }: { host: PluginSurfaceProps["host"]; hidden: boolean; onChange(hidden: boolean): void; colors: Colors }) {
-  const api = useBotHost(null, { id: host.id, label: host.label }).api;
-  const support = useQuery({
-    queryKey: ["paseo-bots", "background-support", host.id],
-    enabled: !!api,
-    staleTime: 60_000,
-    queryFn: () => supportsBackgroundWorkspaces(api!),
-  });
-  const unsupported = support.data === false;
+  const unsupported = useBackgroundSupport(useBotHost(null, { id: host.id, label: host.label })).data === false;
   return (
     <SettingsSection title="Paseo sidebar" info="Bot chats are still listed in the Bots screen.">
       <SettingsCard>
