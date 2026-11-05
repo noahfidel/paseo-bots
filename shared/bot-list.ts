@@ -7,8 +7,7 @@ import type { Bot } from "./bot";
 export const BotSummarySchema = z.object({ id: z.string(), name: z.string(), title: z.string(), archived: z.boolean() });
 export type BotSummary = z.infer<typeof BotSummarySchema>;
 
-/** `recentChats` is the "Recent chats in Command Center" setting as saved; missing means the default. */
-export const BotListSchema = z.object({ bots: z.array(BotSummarySchema), recentChats: z.number().optional() });
+export const BotListSchema = z.object({ bots: z.array(BotSummarySchema) });
 
 export function botSummaries(values: { bots: readonly Pick<Bot, "id" | "name" | "title" | "archived">[] }): BotSummary[] {
   return values.bots.map(({ id, name, title, archived }) => ({ id, name, title, archived }));

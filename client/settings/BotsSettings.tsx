@@ -9,12 +9,9 @@ import { exportTeamRpc, importTeamRpc } from "../../shared/rpc";
 import { useBackgroundSupport, useBotHost, useProviders } from "../data";
 import { confirmDialog, errorText } from "../native";
 import { Button, CardNote, FormTextArea, SheetActions } from "../panel/controls";
-import { recentChatCount } from "../recent-items";
 import { useBotSettings } from "../useBotSettings";
 
 type Colors = PluginSurfaceProps["theme"]["colors"];
-
-const RECENT_CHAT_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((count) => ({ label: String(count), value: String(count) }));
 
 /** Settings → Plugins → paseo-bots: what new bots start with, saved presets, and team files. */
 export function BotsSettings({ theme, host }: PluginSurfaceProps) {
@@ -35,17 +32,6 @@ export function BotsSettings({ theme, host }: PluginSurfaceProps) {
         onChange={(hideBotChats) => void commit((current) => ({ ...current, hideBotChats }))}
         colors={colors}
       />
-      <SettingsSection title="Command Center" info="Each bot also gets a New chat with <Bot> item.">
-        <SettingsCard>
-          <SettingsSelect
-            label="Recent chats in Command Center"
-            hint="Your most recently used bot chats on this host, across bots, listed as Recent: <Bot> · <chat>."
-            value={String(recentChatCount(values.recentChats))}
-            options={RECENT_CHAT_OPTIONS}
-            onValueChange={(value) => void commit((current) => ({ ...current, recentChats: Number(value) }))}
-          />
-        </SettingsCard>
-      </SettingsSection>
       <SettingsSection title="Presets" info="Bots you saved with Save as preset in their menu: their identity, instructions, playbooks and skills. They're listed under New bot.">
         <SettingsCard>
           {(values.presets ?? []).length === 0 ? <CardNote colors={colors} text="No presets yet" /> : null}

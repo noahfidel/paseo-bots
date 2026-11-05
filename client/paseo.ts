@@ -7,6 +7,5 @@ import type { getPaseoClient } from "@getpaseo/plugin/client";
 export type PaseoApi = ReturnType<typeof getPaseoClient>;
 type PaseoAgentHandle = ReturnType<PaseoApi["agents"]["ref"]>;
 export type PaseoAgent = Exclude<Parameters<PaseoApi["agents"]["ref"]>[0], string>;
-export type PaseoAgentUpdate = Parameters<Parameters<PaseoApi["agents"]["subscribe"]>[0]>[0];
 export type PaseoAgentSendOptions = NonNullable<Parameters<PaseoAgentHandle["send"]>[1]>;
 export type PaseoAgentPermissionResponse = Parameters<PaseoAgentHandle["respondToPermission"]>[0]["response"];

@@ -42,6 +42,7 @@ export function startBotItems({
   intervalMs: number;
 }): () => void {
   const live = new Map<string, { signature: string; remove: () => void }>();
+  let stopped = false;
 
   const apply = (items: BotCommandItem[]) => {
     const next = new Map(items.map((item) => [item.id, item]));
@@ -58,21 +59,7 @@ export function startBotItems({
     }
   };
 
-  const fresh = keepFresh({ fetch: async () => botCommandItems(await fetch()), apply, intervalMs });
-  return () => {
-    fresh.stop();
-    for (const entry of live.values()) entry.remove();
-    live.clear();
-  };
-}
-
-/**
- * Fetches at start, whenever the bots settings change, on a timer and on `refresh()`, and hands
- * each result to `apply`. Requests during a fetch become one more fetch; a failed fetch is
- * skipped, so the current items stay.
- */
-export function keepFresh<T>({ fetch, apply, intervalMs }: { fetch: () => Promise<T>; apply: (result: T) => void; intervalMs: number }): { refresh(): void; stop(): void } {
-  let stopped = false;
+  // Every mounted settings user reports a change, so requests during a fetch become one more fetch.
   let inFlight = false;
   let again = false;
   const refresh = () => {
@@ -84,8 +71,8 @@ export function keepFresh<T>({ fetch, apply, intervalMs }: { fetch: () => Promis
     inFlight = true;
     fetch()
       .then(
-        (result) => {
-          if (!stopped) apply(result);
+        (bots) => {
+          if (!stopped) apply(botCommandItems(bots));
         },
         () => {
           // The daemon side may not be ready yet; the next tick or settings change tries again.
@@ -103,13 +90,12 @@ export function keepFresh<T>({ fetch, apply, intervalMs }: { fetch: () => Promis
   changeListeners.add(refresh);
   const timer = setInterval(refresh, intervalMs);
   refresh();
-  return {
-    refresh,
-    stop() {
-      stopped = true;
-      changeListeners.delete(refresh);
-      clearInterval(timer);
-    },
+  return () => {
+    stopped = true;
+    changeListeners.delete(refresh);
+    clearInterval(timer);
+    for (const entry of live.values()) entry.remove();
+    live.clear();
   };
 }
 

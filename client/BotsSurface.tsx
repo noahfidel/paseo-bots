@@ -20,8 +20,8 @@ import { AvatarTheme } from "./Avatar";
 import { botMenuEntries, chatMenuEntries, ExportDialog, NewBotDialog, RenameDialog } from "./BotDialogs";
 import { BotSidebar, type ChatMenuContext, type MenuSource, type Selection } from "./BotSidebar";
 import { ChatPane, type OutgoingMessage } from "./ChatPane";
-import { fetchBotChats, useBotHost, useChatInvalidation, useHostResolver, useProviders, type LocalHost } from "./data";
-import { attachSurface, openBotSelection, openChatSelection, type SurfaceIntent } from "./intent";
+import { useBotHost, useChatInvalidation, useHostResolver, useProviders, type LocalHost } from "./data";
+import { attachSurface, openBotSelection, type SurfaceIntent } from "./intent";
 import { LibraryView } from "./library/LibraryView";
 import { onLibraryTarget, type LibraryTarget } from "./navigation";
 import { Splash } from "./Splash";
@@ -219,10 +219,9 @@ function BotsSurfaceContent({ theme, layout, host, navigation }: PluginSurfacePr
     return () => subscription.remove();
   }, []);
 
-  // Command Center intents ("New bot", "New chat with <Bot>", "Recent: <Bot> · <chat>"): the screen
-  // an item opens takes its intent when it mounts. Paseo pushes a new Bots screen for each, so
-  // there's no listener.
-  const [openIntent, setOpenIntent] = useState<Exclude<SurfaceIntent, { kind: "new-bot" }> | null>(null);
+  // Command Center intents ("New bot", "New chat with <Bot>"): the screen an item opens takes
+  // its intent when it mounts. Paseo pushes a new Bots screen for each, so there's no listener.
+  const [openIntent, setOpenIntent] = useState<Extract<SurfaceIntent, { kind: "new-chat" }> | null>(null);
   useEffect(() => {
     attachSurface((intent) => {
       if (intent.kind === "new-bot") setCreating(true);
@@ -230,50 +229,19 @@ function BotsSurfaceContent({ theme, layout, host, navigation }: PluginSurfacePr
     });
   }, []);
 
-  // Opens the bot's new chat ("new-chat") or one chat ("open-chat") once the settings are ready.
-  // A chat that's gone opens the bot's new chat; a bot that no longer exists leaves nothing selected.
+  // Opens the bot's new chat from a "new-chat" intent once the settings are ready. A bot that
+  // no longer exists leaves nothing selected.
   const selectRef = useRef<(next: Selection) => void>(() => {});
-  const resolveHostRef = useRef(resolveHost);
-  resolveHostRef.current = resolveHost;
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-  // Counts selection changes, so an "open-chat" answer that arrives after the user picked
-  // something else doesn't replace it. Declared before the intent effect so a selection made in
-  // the same commit is counted before the intent reads the count.
-  const selectionChanges = useRef(0);
-  useEffect(() => {
-    selectionChanges.current += 1;
-  }, [selection]);
   const settingsReady = settings.status === "ready";
   useEffect(() => {
     if (!openIntent || !settingsReady) return;
     setOpenIntent(null);
     const current = latest.current;
     if (current.status !== "ready") return;
-    const show = (next: Selection | null) => {
-      setLibraryView(null);
-      if (next) selectRef.current(next);
-      else setSelection(null);
-    };
-    if (openIntent.kind === "new-chat") {
-      show(openBotSelection(openIntent, current.values.bots));
-      return;
-    }
-    const bot = current.values.bots.find((entry) => entry.id === openIntent.botId);
-    const api = bot ? resolveHostRef.current(bot.hostId).api : null;
-    // A chat list that can't be read (host offline) opens the chat anyway; its pane says what's wrong.
-    // Clearing the intent re-runs this effect, so only unmounting or a selection the user made
-    // meanwhile drops the answer.
-    const changesBefore = selectionChanges.current;
-    void (api ? fetchBotChats(api, openIntent.botId).then((chats) => chats.map((chat) => chat.id), () => null) : Promise.resolve(null)).then((chatIds) => {
-      if (!mountedRef.current || selectionChanges.current !== changesBefore) return;
-      show(openChatSelection(openIntent, current.values.bots, chatIds));
-    });
+    const next = openBotSelection(openIntent, current.values.bots);
+    setLibraryView(null);
+    if (next) selectRef.current(next);
+    else setSelection(null);
   }, [openIntent, settingsReady]);
 
   if (settings.status !== "ready") {
