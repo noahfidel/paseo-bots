@@ -108,7 +108,7 @@ export default function contribute(server: PluginServerContext) {
     if (!values) throw new Error("The bots settings aren't ready yet.");
     return { bots: botSummaries(values) };
   });
-  server.handle(systemPromptRpc,async (input, context) => systemPrompt(input, await library(), context.paseo, await host.values()));
+  server.handle(systemPromptRpc, async (input, context) => systemPrompt(input, await library(), context.paseo, await host.values()));
   server.handle(memoryListRpc, ({ botId }) => listMemory(botId));
   server.handle(memoryReadRpc, ({ botId, name }) => readMemory(botId, name));
   server.handle(memoryWriteRpc, async ({ botId, name, text }) => {
