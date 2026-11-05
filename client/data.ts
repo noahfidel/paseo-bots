@@ -1,5 +1,5 @@
 import { getPaseoClient, usePaseo, useHosts } from "@getpaseo/plugin/client";
-import type { PaseoAgent, PaseoApi } from "./paseo";
+import type { PaseoAgent, PaseoAgentUpdate, PaseoApi } from "./paseo";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
 import { BOT_LABEL } from "../shared/bot";
@@ -133,6 +133,32 @@ export async function fetchBotChats(api: PaseoApi, botId: string): Promise<Paseo
     .map((entry) => entry.agent)
     .filter((agent) => !agent.archivedAt)
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+}
+
+/**
+ * Calls `onChange` for each agent update `relevant` accepts, outside React; returns the cleanup.
+ * Subscribes like useChatInvalidation so updates arrive.
+ */
+export function watchBotChats(api: PaseoApi, relevant: (update: PaseoAgentUpdate) => boolean, onChange: () => void): () => void {
+  let closed = false;
+  let subscription: { release(): Promise<void> } | null = null;
+  const unsubscribe = api.agents.subscribe((update) => {
+    if (relevant(update)) onChange();
+  });
+  void retryUntil(
+    () => withBackground((includeBackground) => api.agents.list({ page: { limit: 1 }, subscribe: {}, ...(includeBackground ? { includeBackground: true } : {}) }), api),
+    () => closed,
+    [1_000, 2_000, 5_000, 15_000],
+  ).then((result) => {
+    if (!result) return;
+    if (closed) void result.subscription.release();
+    else subscription = result.subscription;
+  });
+  return () => {
+    closed = true;
+    unsubscribe();
+    void subscription?.release();
+  };
 }
 
 /** Refetches chat lists shortly after any agent update, so chats routines start show up too. */

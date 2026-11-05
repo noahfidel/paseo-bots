@@ -3,7 +3,7 @@
 // Paseo's openSurface always pushes a new Bots screen, even when one is open, and
 // earlier ones can stay mounted under it, so only a mounting screen may take one.
 
-export type SurfaceIntent = { kind: "new-bot" } | { kind: "new-chat"; botId: string };
+export type SurfaceIntent = { kind: "new-bot" } | { kind: "new-chat"; botId: string } | { kind: "open-chat"; botId: string; chatId: string };
 
 let pending: SurfaceIntent | null = null;
 
@@ -29,4 +29,19 @@ export function openBotSelection(
   bots: readonly { id: string }[],
 ): { botId: string; chatId: null } | null {
   return bots.some((bot) => bot.id === intent.botId) ? { botId: intent.botId, chatId: null } : null;
+}
+
+/**
+ * The selection an "open-chat" intent opens: that chat, or the bot's new chat once the chat is
+ * gone. `chatIds` is the bot's current chats; null when they couldn't be read, which opens the
+ * chat anyway. Null when the bot no longer exists.
+ */
+export function openChatSelection(
+  intent: Extract<SurfaceIntent, { kind: "open-chat" }>,
+  bots: readonly { id: string }[],
+  chatIds: readonly string[] | null,
+): { botId: string; chatId: string | null } | null {
+  if (!bots.some((bot) => bot.id === intent.botId)) return null;
+  const exists = chatIds === null || chatIds.includes(intent.chatId);
+  return { botId: intent.botId, chatId: exists ? intent.chatId : null };
 }

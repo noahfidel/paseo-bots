@@ -5,6 +5,8 @@ import { NativeConnectCard } from "./client/chat/stream/ConnectCard";
 import { ProposalCard } from "./client/chat/stream/ProposalCard";
 import { RoutineRunCard } from "./client/chat/stream/RoutineRunCard";
 import { startBotItems } from "./client/bot-items";
+import { fetchBotChats, watchBotChats } from "./client/data";
+import { fetchRecentChats, recentChatChanges, recentChatCount, recentChatItems, startRecentChatItems } from "./client/recent-items";
 import { requestIntent } from "./client/intent";
 import { BotsSettings } from "./client/settings/BotsSettings";
 import { installTooltips } from "./client/ui/Tooltip";
@@ -59,6 +61,29 @@ export default function contribute(client: PluginClientContext) {
         },
       }),
   });
+  // "Recent: <Bot> · <chat>" for the most recently active bot chats on this host, across bots.
+  const stopRecentItems = startRecentChatItems({
+    fetch: async () => {
+      const { bots, recentChats } = await client.rpc(botListRpc, {});
+      const chats = await fetchRecentChats(bots, (botId) => fetchBotChats(client.paseo, botId));
+      return recentChatItems(bots, chats, recentChatCount(recentChats));
+    },
+    intervalMs: 60_000,
+    debounceMs: 5_000,
+    watchAgents: (listener) => watchBotChats(client.paseo, recentChatChanges(), listener),
+    register: (item) =>
+      client.addCommandCenterItem({
+        id: item.id,
+        title: item.title,
+        icon: "MessageSquare",
+        keywords: item.keywords,
+        context: "global",
+        onSelect({ openSurface }) {
+          requestIntent(item.intent);
+          openSurface("bots");
+        },
+      }),
+  });
   // Bot chats opened in Paseo's own agent view get the same /learn and skill cards.
   client.addSlashCommand({
     ...LEARN_COMMAND,
@@ -104,6 +129,7 @@ export default function contribute(client: PluginClientContext) {
   });
   return () => {
     stopBotItems();
+    stopRecentItems();
     removeTooltips();
   };
 }
