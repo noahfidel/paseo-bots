@@ -1,15 +1,14 @@
 // Command Center items can open the surface but can't pass it arguments.
-// They leave an intent here; the surface takes it when it mounts, or, when a
-// Bots screen is already open, as soon as it's requested.
+// They leave an intent here, and the Bots screen they open takes it when it mounts.
+// Paseo's openSurface always pushes a new Bots screen, even when one is open, and
+// earlier ones can stay mounted under it, so only a mounting screen may take one.
 
-export type SurfaceIntent = { kind: "new-bot" } | { kind: "open-bot"; botId: string; chat: "latest" | "new" };
+export type SurfaceIntent = { kind: "new-bot" } | { kind: "new-chat"; botId: string };
 
 let pending: SurfaceIntent | null = null;
-const listeners = new Set<() => void>();
 
 export function requestIntent(intent: SurfaceIntent): void {
   pending = intent;
-  for (const listener of [...listeners]) listener();
 }
 
 export function takeIntent(): SurfaceIntent | null {
@@ -18,23 +17,16 @@ export function takeIntent(): SurfaceIntent | null {
   return intent;
 }
 
-/** Called whenever an intent is requested; the listener takes it with `takeIntent()`. */
-export function onIntent(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
+/** What a Bots screen does with intents when it mounts: takes the pending one, if any. */
+export function attachSurface(apply: (intent: SurfaceIntent) => void): void {
+  const intent = takeIntent();
+  if (intent) apply(intent);
 }
 
-/**
- * The bot and chat an "open-bot" intent selects: the bot's most recent chat (`chats` newest
- * first), or its new chat. Null when the bot no longer exists.
- */
+/** The selection a "new-chat" intent opens: the bot's new chat. Null when the bot no longer exists. */
 export function openBotSelection(
-  intent: Extract<SurfaceIntent, { kind: "open-bot" }>,
+  intent: Extract<SurfaceIntent, { kind: "new-chat" }>,
   bots: readonly { id: string }[],
-  chats: readonly { id: string }[],
-): { botId: string; chatId: string | null } | null {
-  if (!bots.some((bot) => bot.id === intent.botId)) return null;
-  return { botId: intent.botId, chatId: intent.chat === "latest" ? (chats[0]?.id ?? null) : null };
+): { botId: string; chatId: null } | null {
+  return bots.some((bot) => bot.id === intent.botId) ? { botId: intent.botId, chatId: null } : null;
 }

@@ -42,7 +42,7 @@ export default function contribute(client: PluginClientContext) {
       openSurface("bots");
     },
   });
-  // "<Bot>" and "New chat with <Bot>" for every unarchived bot.
+  // "New chat with <Bot>" for every unarchived bot.
   const stopBotItems = startBotItems({
     fetch: async () => (await client.rpc(botListRpc, {})).bots,
     intervalMs: 60_000,

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { botCommandItems, notifyBotsChanged, startBotItems, type BotCommandItem } from "../client/bot-items";
-import { onIntent, openBotSelection, requestIntent, takeIntent, type SurfaceIntent } from "../client/intent";
+import { attachSurface, openBotSelection, requestIntent, takeIntent, type SurfaceIntent } from "../client/intent";
 import { BotListSchema, botSummaries, type BotSummary } from "../shared/bot-list";
 import { makeBot } from "./helpers";
 
@@ -17,34 +17,27 @@ describe("surface intents", () => {
     expect(takeIntent()).toBeNull();
   });
 
-  it("hands an intent requested while a surface is open to its listener", () => {
-    const seen: (SurfaceIntent | null)[] = [];
-    const stop = onIntent(() => seen.push(takeIntent()));
-    requestIntent({ kind: "open-bot", botId: "bot-1", chat: "latest" });
-    expect(seen).toEqual([{ kind: "open-bot", botId: "bot-1", chat: "latest" }]);
-    expect(takeIntent()).toBeNull();
-    stop();
-    requestIntent({ kind: "new-bot" });
-    expect(seen).toHaveLength(1);
-    expect(takeIntent()).toEqual({ kind: "new-bot" });
+  it("gives a Command Center intent to the Bots screen it opens, not to one already in the stack", () => {
+    // Paseo's openSurface pushes a new Bots screen; an earlier one can stay mounted under it.
+    const first: SurfaceIntent[] = [];
+    const second: SurfaceIntent[] = [];
+    attachSurface((intent) => first.push(intent));
+    requestIntent({ kind: "new-chat", botId: "bot-1" });
+    attachSurface((intent) => second.push(intent));
+    expect(second).toEqual([{ kind: "new-chat", botId: "bot-1" }]);
+    expect(first).toEqual([]);
   });
 });
 
 describe("openBotSelection", () => {
   const bots = [{ id: "bot-1" }, { id: "bot-2" }];
-  const chats = [{ id: "newest" }, { id: "older" }];
 
-  it("opens the bot on its most recent chat", () => {
-    expect(openBotSelection({ kind: "open-bot", botId: "bot-1", chat: "latest" }, bots, chats)).toEqual({ botId: "bot-1", chatId: "newest" });
-  });
-
-  it("opens the bot's new chat when it has none, or when asked for one", () => {
-    expect(openBotSelection({ kind: "open-bot", botId: "bot-1", chat: "latest" }, bots, [])).toEqual({ botId: "bot-1", chatId: null });
-    expect(openBotSelection({ kind: "open-bot", botId: "bot-1", chat: "new" }, bots, chats)).toEqual({ botId: "bot-1", chatId: null });
+  it("opens the bot's new chat", () => {
+    expect(openBotSelection({ kind: "new-chat", botId: "bot-1" }, bots)).toEqual({ botId: "bot-1", chatId: null });
   });
 
   it("selects nothing for a bot that no longer exists", () => {
-    expect(openBotSelection({ kind: "open-bot", botId: "gone", chat: "latest" }, bots, chats)).toBeNull();
+    expect(openBotSelection({ kind: "new-chat", botId: "gone" }, bots)).toBeNull();
   });
 });
 
@@ -58,17 +51,14 @@ describe("botSummaries", () => {
 });
 
 describe("botCommandItems", () => {
-  it("adds an open and a new-chat item per bot, searchable by name and title", () => {
+  it("adds a new-chat item per bot, searchable by name and title", () => {
     const items = botCommandItems([summary()]);
-    expect(items.map((item) => [item.id, item.title, item.intent])).toEqual([
-      ["bot-open-bot-1", "Inbox", { kind: "open-bot", botId: "bot-1", chat: "latest" }],
-      ["bot-new-bot-1", "New chat with Inbox", { kind: "open-bot", botId: "bot-1", chat: "new" }],
-    ]);
-    expect(items[0]!.keywords).toEqual(expect.arrayContaining(["Inbox", "Triages mail"]));
+    expect(items.map((item) => [item.id, item.title, item.intent])).toEqual([["bot-new-bot-1", "New chat with Inbox", { kind: "new-chat", botId: "bot-1" }]]);
+    expect(items[0]!.keywords).toEqual(expect.arrayContaining(["Inbox", "Triages mail", "new chat"]));
   });
 
   it("leaves out archived bots", () => {
-    expect(botCommandItems([summary({ archived: true }), summary({ id: "bot-2", name: "Ops" })]).map((item) => item.id)).toEqual(["bot-open-bot-2", "bot-new-bot-2"]);
+    expect(botCommandItems([summary({ archived: true }), summary({ id: "bot-2", name: "Ops" })]).map((item) => item.id)).toEqual(["bot-new-bot-2"]);
   });
 
   it("leaves an empty title out of the keywords", () => {
@@ -95,7 +85,7 @@ describe("startBotItems", () => {
   it("registers items for the bots fetched at start", async () => {
     const { live, stop } = setup(async () => [summary()]);
     await flush();
-    expect([...live.keys()]).toEqual(["bot-open-bot-1", "bot-new-bot-1"]);
+    expect([...live.keys()]).toEqual(["bot-new-bot-1"]);
     stop();
     expect(live.size).toBe(0);
   });
@@ -107,7 +97,7 @@ describe("startBotItems", () => {
     bots = [summary({ name: "Mail" })];
     notifyBotsChanged();
     await flush();
-    expect([...live.values()].map((item) => item.title)).toEqual(["Mail", "New chat with Mail"]);
+    expect([...live.values()].map((item) => item.title)).toEqual(["New chat with Mail"]);
     // Unchanged items aren't registered again.
     const calls = register.mock.calls.length;
     notifyBotsChanged();
@@ -139,10 +129,10 @@ describe("startBotItems", () => {
     fail = true;
     name = "Mail";
     await vi.advanceTimersByTimeAsync(60_000);
-    expect([...live.values()].map((item) => item.title)).toEqual(["Inbox", "New chat with Inbox"]);
+    expect([...live.values()].map((item) => item.title)).toEqual(["New chat with Inbox"]);
     fail = false;
     await vi.advanceTimersByTimeAsync(60_000);
-    expect([...live.values()].map((item) => item.title)).toEqual(["Mail", "New chat with Mail"]);
+    expect([...live.values()].map((item) => item.title)).toEqual(["New chat with Mail"]);
     stop();
   });
 

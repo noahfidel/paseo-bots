@@ -20,8 +20,8 @@ import { AvatarTheme } from "./Avatar";
 import { botMenuEntries, chatMenuEntries, ExportDialog, NewBotDialog, RenameDialog } from "./BotDialogs";
 import { BotSidebar, type ChatMenuContext, type MenuSource, type Selection } from "./BotSidebar";
 import { ChatPane, type OutgoingMessage } from "./ChatPane";
-import { fetchBotChats, useBotHost, useChatInvalidation, useHostResolver, useProviders, type LocalHost } from "./data";
-import { onIntent, openBotSelection, takeIntent, type SurfaceIntent } from "./intent";
+import { useBotHost, useChatInvalidation, useHostResolver, useProviders, type LocalHost } from "./data";
+import { attachSurface, openBotSelection, type SurfaceIntent } from "./intent";
 import { LibraryView } from "./library/LibraryView";
 import { onLibraryTarget, type LibraryTarget } from "./navigation";
 import { Splash } from "./Splash";
@@ -219,39 +219,29 @@ function BotsSurfaceContent({ theme, layout, host, navigation }: PluginSurfacePr
     return () => subscription.remove();
   }, []);
 
-  // Command Center intents ("New bot", a bot, a new chat with a bot): taken when the screen
-  // mounts, and while it's already open. Only one Bots screen takes each.
-  const [openIntent, setOpenIntent] = useState<Extract<SurfaceIntent, { kind: "open-bot" }> | null>(null);
+  // Command Center intents ("New bot", "New chat with <Bot>"): the screen an item opens takes
+  // its intent when it mounts. Paseo pushes a new Bots screen for each, so there's no listener.
+  const [openIntent, setOpenIntent] = useState<Extract<SurfaceIntent, { kind: "new-chat" }> | null>(null);
   useEffect(() => {
-    const handle = () => {
-      const intent = takeIntent();
-      if (intent?.kind === "new-bot") setCreating(true);
-      else if (intent?.kind === "open-bot") setOpenIntent(intent);
-    };
-    handle();
-    return onIntent(handle);
+    attachSurface((intent) => {
+      if (intent.kind === "new-bot") setCreating(true);
+      else setOpenIntent(intent);
+    });
   }, []);
 
-  // Opens the bot from an "open-bot" intent once the settings are ready. A bot that no
-  // longer exists leaves nothing selected; a chat list that can't be read opens a new chat.
+  // Opens the bot's new chat from a "new-chat" intent once the settings are ready. A bot that
+  // no longer exists leaves nothing selected.
   const selectRef = useRef<(next: Selection) => void>(() => {});
-  const openRequest = useRef(0);
   const settingsReady = settings.status === "ready";
   useEffect(() => {
     if (!openIntent || !settingsReady) return;
     setOpenIntent(null);
     const current = latest.current;
     if (current.status !== "ready") return;
-    const request = ++openRequest.current;
-    const bot = current.values.bots.find((candidate) => candidate.id === openIntent.botId);
-    const api = bot && openIntent.chat === "latest" ? resolveHost(bot.hostId).api : null;
-    void (api ? fetchBotChats(api, openIntent.botId).catch(() => []) : Promise.resolve([])).then((chats) => {
-      if (request !== openRequest.current) return;
-      const next = openBotSelection(openIntent, current.values.bots, chats);
-      setLibraryView(null);
-      if (next) selectRef.current(next);
-      else setSelection(null);
-    });
+    const next = openBotSelection(openIntent, current.values.bots);
+    setLibraryView(null);
+    if (next) selectRef.current(next);
+    else setSelection(null);
   }, [openIntent, settingsReady]);
 
   if (settings.status !== "ready") {

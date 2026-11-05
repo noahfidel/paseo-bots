@@ -9,19 +9,19 @@ export interface BotCommandItem {
   id: string;
   title: string;
   keywords: string[];
-  intent: Extract<SurfaceIntent, { kind: "open-bot" }>;
+  intent: Extract<SurfaceIntent, { kind: "new-chat" }>;
 }
 
+/** "New chat with <Bot>" for every unarchived bot, searchable by name and title. */
 export function botCommandItems(bots: readonly BotSummary[]): BotCommandItem[] {
   return bots
     .filter((bot) => !bot.archived)
-    .flatMap((bot) => {
-      const keywords = ["bot", bot.name, ...(bot.title ? [bot.title] : [])];
-      return [
-        { id: `bot-open-${bot.id}`, title: bot.name, keywords, intent: { kind: "open-bot", botId: bot.id, chat: "latest" } },
-        { id: `bot-new-${bot.id}`, title: `New chat with ${bot.name}`, keywords: [...keywords, "new chat"], intent: { kind: "open-bot", botId: bot.id, chat: "new" } },
-      ];
-    });
+    .map((bot) => ({
+      id: `bot-new-${bot.id}`,
+      title: `New chat with ${bot.name}`,
+      keywords: ["bot", "new chat", bot.name, ...(bot.title ? [bot.title] : [])],
+      intent: { kind: "new-chat", botId: bot.id },
+    }));
 }
 
 const changeListeners = new Set<() => void>();
