@@ -4,13 +4,14 @@ import { BotsSurface } from "./client/BotsSurface";
 import { NativeConnectCard } from "./client/chat/stream/ConnectCard";
 import { ProposalCard } from "./client/chat/stream/ProposalCard";
 import { RoutineRunCard } from "./client/chat/stream/RoutineRunCard";
+import { startBotItems } from "./client/bot-items";
 import { requestIntent } from "./client/intent";
 import { BotsSettings } from "./client/settings/BotsSettings";
 import { installTooltips } from "./client/ui/Tooltip";
 import { appSignIns } from "./shared/apps";
 import { BOT_LABEL } from "./shared/bot";
 import { proposalIdOf } from "./shared/proposals";
-import { APP_SIGN_IN_CARD, AppSignInSchema, helloRpc, ROUTINE_RUN_CARD, RoutineRunCardSchema } from "./shared/rpc";
+import { APP_SIGN_IN_CARD, AppSignInSchema, botListRpc, helloRpc, ROUTINE_RUN_CARD, RoutineRunCardSchema } from "./shared/rpc";
 import { LEARN_COMMAND, learnPrompt } from "./shared/skills";
 
 export default function contribute(client: PluginClientContext) {
@@ -40,6 +41,23 @@ export default function contribute(client: PluginClientContext) {
       requestIntent({ kind: "new-bot" });
       openSurface("bots");
     },
+  });
+  // "<Bot>" and "New chat with <Bot>" for every unarchived bot.
+  const stopBotItems = startBotItems({
+    fetch: async () => (await client.rpc(botListRpc, {})).bots,
+    intervalMs: 60_000,
+    register: (item) =>
+      client.addCommandCenterItem({
+        id: item.id,
+        title: item.title,
+        icon: "Bot",
+        keywords: item.keywords,
+        context: "global",
+        onSelect({ openSurface }) {
+          requestIntent(item.intent);
+          openSurface("bots");
+        },
+      }),
   });
   // Bot chats opened in Paseo's own agent view get the same /learn and skill cards.
   client.addSlashCommand({
@@ -84,5 +102,8 @@ export default function contribute(client: PluginClientContext) {
     schema: RoutineRunCardSchema,
     Component: ({ item, theme }) => <RoutineRunCard colors={theme.colors} card={item.data} />,
   });
-  return removeTooltips;
+  return () => {
+    stopBotItems();
+    removeTooltips();
+  };
 }

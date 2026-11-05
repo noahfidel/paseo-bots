@@ -1,6 +1,7 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import { BotGroupSchema, BotMcpServerSchema, BotSchema, McpServerConfigSchema, McpToolSchema, TeamFileTeamSchema } from "./bot";
+import { BotListSchema } from "./bot-list";
 import { ProposalSchema } from "./proposals";
 
 const BotId = z.string().regex(/^[a-z0-9-]+$/);
@@ -23,6 +24,13 @@ export const helloRpc = defineRpc({
   name: "bots.hello",
   input: z.object({}),
   output: z.object({ scheduler: z.boolean() }),
+});
+
+/** Bot names and titles for the Command Center. Fails while the settings aren't ready. */
+export const botListRpc = defineRpc({
+  name: "bots.list",
+  input: z.object({}),
+  output: BotListSchema,
 });
 
 const PromptSectionSchema = z.object({ title: z.string(), text: z.string() });

@@ -19,7 +19,9 @@ import { BOT_TOOLS } from "./server/tools";
 import { saveUpload } from "./server/uploads";
 import { botSettings, EMPTY_LIBRARY } from "./shared/bot";
 import { shellCommand } from "./shared/commands";
+import { botSummaries } from "./shared/bot-list";
 import {
+  botListRpc,
   commandAllowRpc,
   commandListRpc,
   commandRemoveRpc,
@@ -100,7 +102,13 @@ export default function contribute(server: PluginServerContext) {
     attach(context);
     return ensureBotHome(input);
   });
-  server.handle(systemPromptRpc, async (input, context) => systemPrompt(input, await library(), context.paseo, await host.values()));
+  server.handle(botListRpc, async () => {
+    const values = await host.values();
+    // Throwing (not an empty list) keeps the app's current Command Center items.
+    if (!values) throw new Error("The bots settings aren't ready yet.");
+    return { bots: botSummaries(values) };
+  });
+  server.handle(systemPromptRpc,async (input, context) => systemPrompt(input, await library(), context.paseo, await host.values()));
   server.handle(memoryListRpc, ({ botId }) => listMemory(botId));
   server.handle(memoryReadRpc, ({ botId, name }) => readMemory(botId, name));
   server.handle(memoryWriteRpc, async ({ botId, name, text }) => {

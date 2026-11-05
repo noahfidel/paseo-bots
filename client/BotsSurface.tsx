@@ -20,8 +20,8 @@ import { AvatarTheme } from "./Avatar";
 import { botMenuEntries, chatMenuEntries, ExportDialog, NewBotDialog, RenameDialog } from "./BotDialogs";
 import { BotSidebar, type ChatMenuContext, type MenuSource, type Selection } from "./BotSidebar";
 import { ChatPane, type OutgoingMessage } from "./ChatPane";
-import { useBotHost, useChatInvalidation, useHostResolver, useProviders, type LocalHost } from "./data";
-import { takeIntent } from "./intent";
+import { fetchBotChats, useBotHost, useChatInvalidation, useHostResolver, useProviders, type LocalHost } from "./data";
+import { onIntent, openBotSelection, takeIntent, type SurfaceIntent } from "./intent";
 import { LibraryView } from "./library/LibraryView";
 import { onLibraryTarget, type LibraryTarget } from "./navigation";
 import { Splash } from "./Splash";
@@ -219,11 +219,40 @@ function BotsSurfaceContent({ theme, layout, host, navigation }: PluginSurfacePr
     return () => subscription.remove();
   }, []);
 
-  // "New bot" from the Command Center opens a fresh Bots screen; only that one consumes it.
+  // Command Center intents ("New bot", a bot, a new chat with a bot): taken when the screen
+  // mounts, and while it's already open. Only one Bots screen takes each.
+  const [openIntent, setOpenIntent] = useState<Extract<SurfaceIntent, { kind: "open-bot" }> | null>(null);
   useEffect(() => {
-    const intent = takeIntent();
-    if (intent?.kind === "new-bot") setCreating(true);
+    const handle = () => {
+      const intent = takeIntent();
+      if (intent?.kind === "new-bot") setCreating(true);
+      else if (intent?.kind === "open-bot") setOpenIntent(intent);
+    };
+    handle();
+    return onIntent(handle);
   }, []);
+
+  // Opens the bot from an "open-bot" intent once the settings are ready. A bot that no
+  // longer exists leaves nothing selected; a chat list that can't be read opens a new chat.
+  const selectRef = useRef<(next: Selection) => void>(() => {});
+  const openRequest = useRef(0);
+  const settingsReady = settings.status === "ready";
+  useEffect(() => {
+    if (!openIntent || !settingsReady) return;
+    setOpenIntent(null);
+    const current = latest.current;
+    if (current.status !== "ready") return;
+    const request = ++openRequest.current;
+    const bot = current.values.bots.find((candidate) => candidate.id === openIntent.botId);
+    const api = bot && openIntent.chat === "latest" ? resolveHost(bot.hostId).api : null;
+    void (api ? fetchBotChats(api, openIntent.botId).catch(() => []) : Promise.resolve([])).then((chats) => {
+      if (request !== openRequest.current) return;
+      const next = openBotSelection(openIntent, current.values.bots, chats);
+      setLibraryView(null);
+      if (next) selectRef.current(next);
+      else setSelection(null);
+    });
+  }, [openIntent, settingsReady]);
 
   if (settings.status !== "ready") {
     return (
@@ -274,6 +303,7 @@ function BotsSurfaceContent({ theme, layout, host, navigation }: PluginSurfacePr
       updateUi((current) => ({ ...current, tab: tab ?? current.tab, collapsed: current.collapsed.filter((id) => id !== next.botId) }));
     }
   };
+  selectRef.current = select;
 
   const openPanel = (bot: Bot, section: SectionId | null) => {
     if (selection?.botId !== bot.id) select({ botId: bot.id, chatId: null });

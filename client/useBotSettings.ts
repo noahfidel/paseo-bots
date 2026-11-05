@@ -1,7 +1,8 @@
 import { useSettings } from "@getpaseo/plugin/client";
 import { useToast } from "@getpaseo/plugin/client/react-native";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { botSettings, type BotSettingsValues } from "../shared/bot";
+import { notifyBotsChanged } from "./bot-items";
 
 export type BotSettingsState = ReturnType<typeof useBotSettingsState>;
 
@@ -20,6 +21,11 @@ export function useBotSettings() {
   const latest = useRef(settings);
   latest.current = settings;
   const queue = useRef<Promise<unknown>>(Promise.resolve());
+  // A new revision means bots may have been added, renamed or removed; the Command Center items fetch again.
+  const revision = settings.status === "ready" ? settings.revision : null;
+  useEffect(() => {
+    if (revision) notifyBotsChanged();
+  }, [revision]);
 
   const commit = (mutate: (values: BotSettingsValues) => BotSettingsValues): Promise<boolean> => {
     const run = async () => {

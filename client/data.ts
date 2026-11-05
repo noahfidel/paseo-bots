@@ -121,15 +121,18 @@ export function useBotChats(host: BotHost, botId: string) {
     enabled: !!host.api,
     // The local host pushes agent updates (useChatInvalidation); other hosts are polled.
     refetchInterval: host.isLocal ? false : 15_000,
-    queryFn: async (): Promise<PaseoAgent[]> => {
-      // Chats in background workspaces (the "hide from Paseo's sidebar" setting) only come back when asked for.
-      const result = await withBackground((includeBackground) => host.api!.agents.list({ filter: withBackgroundFilter({ labels: { [BOT_LABEL]: botId } }, includeBackground) }), host.api!);
-      return result.entries
-        .map((entry) => entry.agent)
-        .filter((agent) => !agent.archivedAt)
-        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
-    },
+    queryFn: () => fetchBotChats(host.api!, botId),
   });
+}
+
+/** A bot's unarchived chats on a host, newest first. */
+export async function fetchBotChats(api: PaseoApi, botId: string): Promise<PaseoAgent[]> {
+  // Chats in background workspaces (the "hide from Paseo's sidebar" setting) only come back when asked for.
+  const result = await withBackground((includeBackground) => api.agents.list({ filter: withBackgroundFilter({ labels: { [BOT_LABEL]: botId } }, includeBackground) }), api);
+  return result.entries
+    .map((entry) => entry.agent)
+    .filter((agent) => !agent.archivedAt)
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 }
 
 /** Refetches chat lists shortly after any agent update, so chats routines start show up too. */
