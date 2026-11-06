@@ -202,12 +202,13 @@ export default function contribute(server: PluginServerContext) {
     paseo: paseoSchedules,
     seenPath: join(launchd.env.dataDir, "alerts-seen.json"),
   });
-  // launchd-jobs' jobs move into this plugin's namespace; a job that can't move keeps running as it was.
+  // launchd-jobs' jobs move into this plugin's namespace, each kept loaded, unloaded or paused as it was;
+  // a job that can't move is put back as it was. It runs in the jobs queue, after which the RPCs below go.
   void adoptLaunchdJobs(launchd)
     .then((result) => {
       for (const { from, to } of result.adopted) console.log(`paseo-bots: adopted ${from} as ${to}`);
       for (const { label, reason } of result.skipped) console.warn(`paseo-bots: didn't adopt ${label} yet: ${reason}`);
-      for (const { label, error } of result.failed) console.error(`paseo-bots: couldn't adopt ${label}; it keeps running as before: ${error}`);
+      for (const { label, error } of result.failed) console.error(`paseo-bots: couldn't adopt ${label}; it was put back as it was, and the next start tries again: ${error}`);
     })
     .catch((error: unknown) => console.error("paseo-bots: couldn't adopt launchd-jobs' jobs", error));
   server.handle(schedulesListRpc, (_input, context) => {

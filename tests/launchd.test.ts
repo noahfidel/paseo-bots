@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LaunchdJobs, plutilJson, RUNNER_SCRIPT, type CommandResult, type LaunchdEnv } from "../server/launchd";
 import { adoptLaunchdJobs, OLD_PREFIX } from "../server/launchd-adopt";
 import { commandOf, jobPlist, renderPlist, scheduleOf } from "../server/launchd-plist";
@@ -17,8 +17,23 @@ class FakeLaunchctl {
   calls: string[][] = [];
   /** Labels whose bootstrap fails. */
   refuse = new Set<string>();
+  /** Labels whose next N bootstraps fail, as launchd does right after a bootout. */
+  refuseTimes = new Map<string, number>();
+  /** The process "dies" after this call: it's carried out, and its caller never hears back. */
+  crashAfter: ((args: string[]) => boolean) | null = null;
+  /** Checked before every call. */
+  beforeCall: (() => void) | null = null;
+  delayMs = 0;
 
   run = async (args: string[]): Promise<CommandResult> => {
+    this.beforeCall?.();
+    if (this.delayMs) await new Promise((resolve) => setTimeout(resolve, this.delayMs));
+    const result = await this.carryOut(args);
+    if (this.crashAfter?.(args)) return new Promise<CommandResult>(() => {});
+    return result;
+  };
+
+  private carryOut = async (args: string[]): Promise<CommandResult> => {
     this.calls.push(args);
     const [verb, target = "", path = ""] = args;
     const label = target.replace(`gui/${UID}/`, "");
@@ -39,6 +54,11 @@ class FakeLaunchctl {
         const plist = await plutilJson(path);
         const plistLabel = String(plist.Label);
         if (this.refuse.has(plistLabel) || this.disabled.has(plistLabel)) return fail(5, "Bootstrap failed: 5: Input/output error");
+        const times = this.refuseTimes.get(plistLabel) ?? 0;
+        if (times > 0) {
+          this.refuseTimes.set(plistLabel, times - 1);
+          return fail(37, "Bootstrap failed: 37: Operation already in progress");
+        }
         if (this.loaded.has(plistLabel)) return fail(5, "Bootstrap failed: 5: Input/output error");
         this.loaded.set(plistLabel, { path, running: false });
         return ok();
@@ -58,6 +78,10 @@ class FakeLaunchctl {
 
   verbs(): string[] {
     return this.calls.map((call) => call[0]!);
+  }
+
+  bootstraps(label: string): number {
+    return this.calls.filter((call) => call[0] === "bootstrap" && call[2]!.endsWith(`/${label}.plist`)).length;
   }
 }
 
@@ -255,10 +279,24 @@ function seedOldJob(options: { loaded?: boolean; running?: boolean; disabled?: b
   return { oldDir, oldPlist, other, otherText: readFileSync(other, "utf8") };
 }
 
+const NEW_LABEL = "com.noahfidel.schedules.pr-watch";
+
+/** Fails the test if both plists are ever in LaunchAgents at once (a login then would start both). */
+function neverBoth(oldPlist: string): string[] {
+  const seen: string[] = [];
+  fake.beforeCall = () => {
+    if (existsSync(oldPlist) && existsSync(jobs.plistPath(OLD_SLUG))) seen.push(fake.calls.at(-1)?.join(" ") ?? "start");
+  };
+  return seen;
+}
+
 describe.skipIf(!onMac)("adopting launchd-jobs' jobs", () => {
   it("moves the job to our label, runner and folder, and backs up the old plist", async () => {
     const { oldPlist, other, otherText } = seedOldJob();
+    const both = neverBoth(oldPlist);
     const result = await adoptLaunchdJobs(jobs);
+    expect(both).toEqual([]);
+    expect(readdirSync(join(env.dataDir, "adopting"))).toEqual([]);
     expect(result).toEqual({ adopted: [{ from: OLD_LABEL, to: "com.noahfidel.schedules.pr-watch" }], skipped: [], failed: [] });
 
     expect(fake.loaded.has(OLD_LABEL)).toBe(false);
@@ -312,6 +350,92 @@ describe.skipIf(!onMac)("adopting launchd-jobs' jobs", () => {
     expect(existsSync(oldPlist)).toBe(true);
     expect(existsSync(jobs.plistPath(OLD_SLUG))).toBe(false);
     expect(await jobs.list()).toEqual([]);
+  });
+
+  it("loads the old job again even when launchd refuses it at first", async () => {
+    const { oldPlist } = seedOldJob();
+    fake.refuse.add(NEW_LABEL);
+    fake.refuseTimes.set(OLD_LABEL, 2);
+    const result = await adoptLaunchdJobs(jobs);
+    expect(result.failed.map((entry) => entry.label)).toEqual([OLD_LABEL]);
+    expect(fake.loaded.get(OLD_LABEL)?.path).toBe(oldPlist);
+    expect(fake.bootstraps(OLD_LABEL)).toBe(3);
+    expect(existsSync(jobs.plistPath(OLD_SLUG))).toBe(false);
+  });
+
+  it("keeps the note when the old job can't be loaded again, so the next start still runs the job", async () => {
+    const { oldPlist } = seedOldJob();
+    fake.refuse.add(NEW_LABEL);
+    fake.refuse.add(OLD_LABEL);
+    expect((await adoptLaunchdJobs(jobs)).failed).toHaveLength(1);
+    expect(fake.loaded.size).toBe(0);
+    expect(existsSync(oldPlist)).toBe(true);
+    expect(existsSync(jobs.plistPath(OLD_SLUG))).toBe(false);
+
+    fake.refuse.clear();
+    const result = await adoptLaunchdJobs(jobs);
+    expect(result.adopted).toEqual([{ from: OLD_LABEL, to: NEW_LABEL }]);
+    expect(fake.loaded.has(NEW_LABEL)).toBe(true);
+    expect(existsSync(oldPlist)).toBe(false);
+  });
+
+  it("after a crash between the old job's bootout and the new one's bootstrap, the next start runs the job", async () => {
+    const { oldPlist } = seedOldJob();
+    fake.crashAfter = (args) => args[0] === "bootout" && args[1]!.endsWith(OLD_LABEL);
+    void adoptLaunchdJobs(jobs);
+    await vi.waitFor(() => expect(fake.loaded.has(OLD_LABEL)).toBe(false));
+    expect(existsSync(oldPlist)).toBe(true);
+
+    // The plugin starts again: a new process, the same launchd and files.
+    fake.crashAfter = null;
+    const result = await adoptLaunchdJobs(new LaunchdJobs(env));
+    expect(result).toMatchObject({ adopted: [{ from: OLD_LABEL, to: NEW_LABEL }], failed: [] });
+    expect(fake.loaded.has(NEW_LABEL)).toBe(true);
+    expect(existsSync(oldPlist)).toBe(false);
+  });
+
+  it("after a crash once the plists have moved, the next start loads the new job", async () => {
+    const { oldPlist } = seedOldJob();
+    const both = neverBoth(oldPlist);
+    fake.crashAfter = (args) => args[0] === "bootout" && args[1]!.endsWith(NEW_LABEL);
+    void adoptLaunchdJobs(jobs);
+    await vi.waitFor(() => expect(fake.calls.some((call) => call[0] === "bootout" && call[1]!.endsWith(NEW_LABEL))).toBe(true));
+    expect(existsSync(oldPlist)).toBe(false);
+    expect(existsSync(jobs.plistPath(OLD_SLUG))).toBe(true);
+    expect(fake.loaded.size).toBe(0);
+
+    fake.crashAfter = null;
+    const result = await adoptLaunchdJobs(new LaunchdJobs(env));
+    expect(result.adopted).toEqual([{ from: OLD_LABEL, to: NEW_LABEL }]);
+    expect(fake.loaded.has(NEW_LABEL)).toBe(true);
+    expect(both).toEqual([]);
+    expect((await jobs.readRuns(OLD_SLUG)).length).toBe(2);
+  });
+
+  it("leaves an old job that was booted out by hand unloaded", async () => {
+    const { oldPlist } = seedOldJob({ loaded: false });
+    const result = await adoptLaunchdJobs(jobs);
+    expect(result.adopted).toEqual([{ from: OLD_LABEL, to: NEW_LABEL }]);
+    expect(fake.verbs()).not.toContain("bootstrap");
+    expect(fake.loaded.size).toBe(0);
+    expect(existsSync(oldPlist)).toBe(false);
+    expect(existsSync(jobs.plistPath(OLD_SLUG))).toBe(true);
+    const [job] = await jobs.list();
+    expect(job).toMatchObject({ loaded: false, disabled: false });
+  });
+
+  it("runs in one queue with the job RPCs, so no jobs.json write is lost", async () => {
+    seedOldJob();
+    fake.delayMs = 2;
+    const [result, created] = await Promise.all([adoptLaunchdJobs(jobs), jobs.create({ name: "Other", command: "true", schedule: { type: "interval", minutes: 5 }, path: "/bin" })]);
+    expect(result.adopted).toHaveLength(1);
+    const file = await jobs.readJobsFile();
+    expect(file.names).toEqual({ [OLD_SLUG]: "PR review watch", [created]: "Other" });
+    expect(file.adopted).toEqual({ [OLD_SLUG]: OLD_LABEL });
+    // The create waited for the whole adoption: none of its launchctl calls come in between.
+    const lastAdoption = fake.calls.findLastIndex((call) => call.join(" ").includes("pr-watch"));
+    const firstCreate = fake.calls.findIndex((call) => call.join(" ").includes(`schedules.${created}`));
+    expect(firstCreate).toBeGreaterThan(lastAdoption);
   });
 
   it("leaves a running job for a later start", async () => {
