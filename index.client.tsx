@@ -26,11 +26,11 @@ export default function contribute(client: PluginClientContext) {
   client.addSidebarItem({ id: "bots", title: "Bots", icon: "Bot", surface: "bots" });
   client.addSettingsScreen({ id: "bots", title: "Bots", icon: "Bot", Component: BotsSettings });
   // Schedules: bot routines, launchd jobs and Paseo schedules in one screen, opened with params, not intents.
-  client.addScreen({ id: SCHEDULES_SCREEN_ID, title: "Schedules", Component: SchedulesScreen });
-  client.addSidebarHeaderItem({ id: "schedules", title: "Schedules", Component: SchedulesSidebarItem });
+  client.addScreen({ id: SCHEDULES_SCREEN_ID, title: "All schedules", Component: SchedulesScreen });
+  client.addSidebarHeaderItem({ id: "schedules", title: "All schedules", Component: SchedulesSidebarItem });
   client.addCommandCenterItem({
     id: "open-schedules",
-    title: "Schedules: Open",
+    title: "All schedules: Open",
     icon: "CalendarClock",
     keywords: ["schedule", "routine", "launchd", "cron", "job"],
     context: "global",

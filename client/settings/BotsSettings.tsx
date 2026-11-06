@@ -32,7 +32,7 @@ export function BotsSettings({ theme, host }: PluginSurfaceProps) {
         onChange={(hideBotChats) => void commit((current) => ({ ...current, hideBotChats }))}
         colors={colors}
       />
-      <SettingsSection title="Schedules" info="The Schedules screen lists bot routines, Paseo schedules and this host's launchd jobs.">
+      <SettingsSection title="All schedules" info="The All schedules screen lists bot routines, Paseo schedules and this host's launchd jobs.">
         <SettingsCard>
           <SettingsSwitch
             label="Show launchd jobs"
