@@ -122,4 +122,4 @@ When a routine, job or Paseo schedule newly fails, a toast says so, once per fai
 
 Jobs made with the launchd-jobs plugin (`com.paseo-plugins.launchd-jobs.*`) are adopted when the plugin starts: each gets a new plist on this plugin's label and runner with its run history, log and name, and the old plist is moved to `adopted/` in the plugin's data folder. A job that can't be moved keeps running as before.
 
-The launchd code is ported from [@gpambrozio/paseo-launchd-jobs](https://github.com/gpambrozio/paseo-plugins) 0.6.0 by Gustavo Ambrozio, under the MIT License.
+The launchd code is ported from [@gpambrozio/paseo-launchd-jobs](https://github.com/gpambrozio/paseo-plugins/tree/main/launchd-jobs) 0.6.0 by Gustavo Ambrozio, under the MIT License.

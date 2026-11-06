@@ -1,5 +1,5 @@
 // Ported from @gpambrozio/paseo-launchd-jobs 0.6.0 (shared/cron.ts), MIT License,
-// Copyright (c) Gustavo Ambrozio. Unchanged apart from this header.
+// Copyright (c) 2026 Gustavo Ambrozio. Unchanged apart from this header.
 
 /**
  * Cron expressions to and from launchd's `StartCalendarInterval`.
