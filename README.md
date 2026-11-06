@@ -120,6 +120,6 @@ Bots get Paseo's own tools, so you can ask one in a chat to start other agents, 
 
 When a routine, job or Paseo schedule newly fails, a toast says so, once per failed run.
 
-Jobs made with the launchd-jobs plugin (`com.paseo-plugins.launchd-jobs.*`) are adopted when the plugin starts: each gets a new plist on this plugin's label and runner with its run history, log and name, and the old plist is moved to `adopted/` in the plugin's data folder. A job that can't be moved keeps running as before.
+Jobs made with the launchd-jobs plugin (`com.paseo-plugins.launchd-jobs.*`) are adopted when the plugin starts: each gets a new plist on this plugin's label and runner with its run history, log and name, and the old plist is moved to `adopted/` in the plugin's data folder. Each job stays loaded, unloaded or paused as it was. A job that can't be moved is put back as it was, and the next start tries again.
 
 The launchd code is ported from [@gpambrozio/paseo-launchd-jobs](https://github.com/gpambrozio/paseo-plugins/tree/main/launchd-jobs) 0.6.0 by Gustavo Ambrozio, under the MIT License.
