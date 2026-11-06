@@ -78,6 +78,7 @@ beforeEach(() => {
     launchctl: fake.run,
     readPlist: plutilJson,
     loginPath: async () => "/opt/homebrew/bin:/usr/bin:/bin",
+    sleep: async () => {},
   };
   jobs = new LaunchdJobs(env);
 });
@@ -169,6 +170,42 @@ describe.skipIf(!onMac)("LaunchdJobs", () => {
     expect(existsSync(jobs.plistPath(id))).toBe(false);
     expect(fake.loaded.has(label)).toBe(false);
     expect(await jobs.list()).toEqual([]);
+  });
+
+  it("keeps the plist keys it doesn't write when a job is saved", async () => {
+    mkdirSync(jobs.launchAgentsDir, { recursive: true });
+    const path = jobs.plistPath("hand");
+    writeFileSync(
+      path,
+      renderPlist({
+        Label: "com.noahfidel.schedules.hand",
+        ProgramArguments: ["/usr/bin/true"],
+        RunAtLoad: true,
+        KeepAlive: { SuccessfulExit: false },
+        StandardOutPath: "/tmp/hand.out",
+        StandardErrorPath: "/tmp/hand.err",
+        EnvironmentVariables: { TOKEN_FILE: "/tmp/t", PATH: "/old" },
+        StartInterval: 300,
+      }),
+    );
+    await jobs.update("hand", { name: "Hand", command: "echo hand", schedule: { type: "interval", minutes: 10 }, path: "/usr/bin:/bin" });
+    const plist = await plutilJson(path);
+    expect(plist).toMatchObject({
+      Label: "com.noahfidel.schedules.hand",
+      ProgramArguments: ["/bin/zsh", jobs.runnerPath, "hand", "echo hand"],
+      StartInterval: 600,
+      RunAtLoad: true,
+      KeepAlive: { SuccessfulExit: false },
+      StandardOutPath: "/tmp/hand.out",
+      StandardErrorPath: jobs.logPath("hand"),
+      EnvironmentVariables: { TOKEN_FILE: "/tmp/t", PATH: "/usr/bin:/bin", PASEO_SCHEDULES_DIR: env.dataDir },
+    });
+    // A switch to set times drops StartInterval rather than keeping both.
+    await jobs.update("hand", { name: "Hand", command: "echo hand", schedule: { type: "calendar", times: ["09:00"], weekdays: [] }, path: "/bin" });
+    const calendar = await plutilJson(path);
+    expect(calendar.StartInterval).toBeUndefined();
+    expect(calendar.StartCalendarInterval).toEqual([{ Hour: 9, Minute: 0 }]);
+    expect(calendar.RunAtLoad).toBe(true);
   });
 
   it("reads run history newest first and the log tail", async () => {

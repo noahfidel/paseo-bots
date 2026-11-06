@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { LaunchdJobSpec, LaunchdSchedule, RunRecord } from "../shared/schedules";
 import { pluginDataPath } from "./bot-home";
-import { commandOf, DIR_VARIABLE, entriesOf, environmentOf, jobPlist, LABEL_PREFIX, renderPlist, scheduleOf } from "./launchd-plist";
+import { commandOf, DIR_VARIABLE, entriesOf, environmentOf, jobPlist, LABEL_PREFIX, renderPlist, scheduleOf, toPlistDict, type PlistDict } from "./launchd-plist";
 import type { CalendarEntry } from "../shared/launchd-cron";
 
 const exec = promisify(execFile);
@@ -28,6 +28,11 @@ const LOG_TAIL_BYTES = 64 * 1024;
 const RUNS_TAIL_BYTES = 64 * 1024;
 const RECENT_RUNS = 20;
 const FALLBACK_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+const BOOTSTRAP_ATTEMPTS = 5;
+const BOOTSTRAP_RETRY_MS = 400;
+
+/** The plist keys a save writes; any other key of the job's plist (RunAtLoad, KeepAlive, StandardOutPath...) is kept. */
+const OWNED_KEYS = ["Label", "Program", "ProgramArguments", "WorkingDirectory", "EnvironmentVariables", "StartInterval", "StartCalendarInterval", "StandardErrorPath"];
 
 export interface CommandResult {
   stdout: string;
@@ -50,6 +55,8 @@ export interface LaunchdEnv {
   readPlist(path: string): Promise<Record<string, unknown>>;
   /** The PATH a new job gets when none is given. */
   loginPath(): Promise<string>;
+  /** Waits between bootstrap attempts; tests make it instant. */
+  sleep?(ms: number): Promise<void>;
 }
 
 function failureText(error: unknown): string {
@@ -180,7 +187,7 @@ export interface LaunchdJob {
   problem: string | null;
 }
 
-interface JobsFile {
+export interface JobsFile {
   names: Record<string, string>;
   /** Slug → the launchd-jobs label it was adopted from. */
   adopted: Record<string, string>;
@@ -250,12 +257,12 @@ export function slugify(name: string): string {
   return slug === "" ? "job" : slug;
 }
 
-/** Writes a script launchd may start at any moment: to a temp file, then renamed over. */
-async function writeScript(path: string, content: string): Promise<void> {
+/** Writes a file another process may read at any moment: to a temp file, then renamed over. */
+export async function writeAtomic(path: string, content: string, mode?: number): Promise<void> {
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
     await writeFile(temporary, content, "utf8");
-    await chmod(temporary, 0o755);
+    if (mode !== undefined) await chmod(temporary, mode);
     await rename(temporary, path);
   } catch (error) {
     await rm(temporary, { force: true });
@@ -264,7 +271,20 @@ async function writeScript(path: string, content: string): Promise<void> {
 }
 
 export class LaunchdJobs {
+  private lock: Promise<unknown> = Promise.resolve();
+
   constructor(readonly env: LaunchdEnv = defaultLaunchdEnv()) {}
+
+  /**
+   * Runs `task` after every earlier one has finished. Everything that writes
+   * jobs.json or moves a job in launchd goes through here (the RPCs and the
+   * adoption on load), so no write is lost to another. Not reentrant.
+   */
+  exclusive<T>(task: () => Promise<T>): Promise<T> {
+    const next = this.lock.then(task);
+    this.lock = next.catch(() => {});
+    return next;
+  }
 
   get supported(): boolean {
     return this.env.platform === "darwin";
@@ -345,6 +365,22 @@ export class LaunchdJobs {
     await this.launchctl(["bootstrap", this.domain, path]);
   }
 
+  /**
+   * Bootstraps, trying again a few times: launchd often refuses a label it has
+   * just booted out ("5: Input/output error", "37: Operation already in progress").
+   */
+  async bootstrapWithRetry(path: string, attempts = BOOTSTRAP_ATTEMPTS): Promise<void> {
+    const sleep = this.env.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await this.bootstrapPlist(path);
+      } catch (error) {
+        if (attempt >= attempts) throw error;
+        await sleep(BOOTSTRAP_RETRY_MS * attempt);
+      }
+    }
+  }
+
   // ---------------------------------------------------------------- files
 
   async readJobsFile(): Promise<JobsFile> {
@@ -357,9 +393,10 @@ export class LaunchdJobs {
     }
   }
 
+  /** Only inside `exclusive`. */
   async writeJobsFile(file: JobsFile): Promise<void> {
     await mkdir(this.env.dataDir, { recursive: true });
-    await writeFile(this.jobsFilePath, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+    await writeAtomic(this.jobsFilePath, `${JSON.stringify(file, null, 2)}\n`);
   }
 
   async ensureRunner(): Promise<string> {
@@ -371,7 +408,7 @@ export class LaunchdJobs {
     } catch (error) {
       if (!isMissing(error)) throw error;
     }
-    if (current !== RUNNER_SCRIPT) await writeScript(this.runnerPath, RUNNER_SCRIPT);
+    if (current !== RUNNER_SCRIPT) await writeAtomic(this.runnerPath, RUNNER_SCRIPT, 0o755);
     return this.runnerPath;
   }
 
@@ -485,14 +522,15 @@ export class LaunchdJobs {
     for (let n = 2; ; n += 1) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
   }
 
-  private async writeJob(slug: string, spec: LaunchdJobSpec, cwd: string | null): Promise<void> {
+  /** Writes the job's plist; `current` is the plist it replaces, whose other keys are kept. */
+  private async writeJob(slug: string, spec: LaunchdJobSpec, cwd: string | null, current: Record<string, unknown> = {}): Promise<void> {
     const runner = await this.ensureRunner();
     const path = spec.path ?? (await this.env.loginPath());
     const file = await this.readJobsFile();
     file.names[slug] = spec.name;
     await this.writeJobsFile(file);
     await mkdir(this.launchAgentsDir, { recursive: true });
-    const plist = jobPlist({
+    const fresh = jobPlist({
       label: this.labelFor(slug),
       slug,
       runner,
@@ -503,34 +541,46 @@ export class LaunchdJobs {
       stderrPath: this.logPath(slug),
       schedule: spec.schedule,
     });
-    await writeFile(this.plistPath(slug), renderPlist(plist), "utf8");
+    const kept: PlistDict = toPlistDict(current);
+    for (const key of OWNED_KEYS) delete kept[key];
+    // Other environment variables the plist had stay too; PATH and the data folder are ours.
+    const environment: PlistDict = { ...environmentOf(current), ...(fresh.EnvironmentVariables as PlistDict) };
+    await writeFile(this.plistPath(slug), renderPlist({ ...fresh, EnvironmentVariables: environment, ...kept }), "utf8");
   }
 
   async create(spec: LaunchdJobSpec): Promise<string> {
     this.assertSupported();
-    const slug = await this.uniqueSlug(spec.name);
-    await this.writeJob(slug, spec, this.normaliseCwd(spec.cwd) ?? null);
-    // The plist stays if launchd refuses it: the list shows it unloaded, and Resume retries.
-    await this.bootstrapPlist(this.plistPath(slug));
-    return slug;
+    return this.exclusive(async () => {
+      const slug = await this.uniqueSlug(spec.name);
+      await this.writeJob(slug, spec, this.normaliseCwd(spec.cwd) ?? null);
+      // The plist stays if launchd refuses it: the list shows it unloaded, and Resume retries.
+      await this.bootstrapPlist(this.plistPath(slug));
+      return slug;
+    });
   }
 
   async update(slug: string, spec: LaunchdJobSpec): Promise<string> {
     this.assertSupported();
-    await this.assertKnown(slug);
-    const label = this.labelFor(slug);
-    const current = await this.env.readPlist(this.plistPath(slug)).catch(() => ({}) as Record<string, unknown>);
-    const cwd = spec.cwd === undefined ? (typeof current.WorkingDirectory === "string" ? current.WorkingDirectory : null) : (this.normaliseCwd(spec.cwd) ?? null);
-    const disabled = (await this.readDisabled()).has(label);
-    // launchd doesn't reread a changed plist; the job has to leave and come back.
-    await this.bootoutIfLoaded(label);
-    await this.writeJob(slug, spec, cwd);
-    if (!disabled) await this.bootstrapPlist(this.plistPath(slug));
-    return slug;
+    return this.exclusive(async () => {
+      await this.assertKnown(slug);
+      const label = this.labelFor(slug);
+      const current = await this.env.readPlist(this.plistPath(slug)).catch(() => ({}) as Record<string, unknown>);
+      const cwd = spec.cwd === undefined ? (typeof current.WorkingDirectory === "string" ? current.WorkingDirectory : null) : (this.normaliseCwd(spec.cwd) ?? null);
+      const disabled = (await this.readDisabled()).has(label);
+      // launchd doesn't reread a changed plist; the job has to leave and come back.
+      await this.bootoutIfLoaded(label);
+      await this.writeJob(slug, spec, cwd, current);
+      if (!disabled) await this.bootstrapWithRetry(this.plistPath(slug));
+      return slug;
+    });
   }
 
   async remove(slug: string): Promise<void> {
     this.assertSupported();
+    return this.exclusive(() => this.removeNow(slug));
+  }
+
+  private async removeNow(slug: string): Promise<void> {
     await this.assertKnown(slug);
     const label = this.labelFor(slug);
     await this.bootoutIfLoaded(label);
@@ -557,16 +607,18 @@ export class LaunchdJobs {
 
   async setEnabled(slug: string, enabled: boolean): Promise<void> {
     this.assertSupported();
-    await this.assertKnown(slug);
-    const label = this.labelFor(slug);
-    if (enabled) {
-      // enable first: bootstrapping a disabled label is refused.
-      await this.launchctl(["enable", `${this.domain}/${label}`]);
-      await this.bootoutIfLoaded(label);
-      await this.bootstrapPlist(this.plistPath(slug));
-    } else {
-      await this.bootoutIfLoaded(label);
-      await this.launchctl(["disable", `${this.domain}/${label}`]);
-    }
+    return this.exclusive(async () => {
+      await this.assertKnown(slug);
+      const label = this.labelFor(slug);
+      if (enabled) {
+        // enable first: bootstrapping a disabled label is refused.
+        await this.launchctl(["enable", `${this.domain}/${label}`]);
+        await this.bootoutIfLoaded(label);
+        await this.bootstrapWithRetry(this.plistPath(slug));
+      } else {
+        await this.bootoutIfLoaded(label);
+        await this.launchctl(["disable", `${this.domain}/${label}`]);
+      }
+    });
   }
 }
