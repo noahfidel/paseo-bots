@@ -109,3 +109,17 @@ The key stays on the Paseo host and never reaches the agents: bots reach Composi
 ### Paseo tools
 
 Bots get Paseo's own tools, so you can ask one in a chat to start other agents, open workspaces and terminals, set up schedules or use the browser. A bot's **Access** settings show whether they're on, and **Turn on** there switches them on for every agent on the host.
+
+### Schedules
+
+**Schedules** in Paseo's sidebar (or **Schedules: Open** in ⌘K) lists everything that runs on a timer on the host, each row badged **Bot routine**, **launchd** or **Paseo schedule**: when it runs, the next run, the last run and, if it failed, why.
+
+- **Bot routines**: pause, resume, run now, and open the last run's chat.
+- **launchd jobs** (macOS): create, edit and delete jobs that run a shell command every N minutes or at set times every day or on chosen weekdays, with the PATH you give or your login shell's. Run now, pause and resume, and see the log and run history. Jobs are LaunchAgents labelled `com.noahfidel.schedules.<name>` in `~/Library/LaunchAgents`; their runner, logs and history live in the plugin's data folder. Turn the list off with **Show launchd jobs** in the Bots settings.
+- **Paseo schedules**: Paseo's own schedules (`paseo schedule`), with pause, resume, run once and their runs. They're read through the `paseo` CLI on the host.
+
+When a routine, job or Paseo schedule newly fails, a toast says so, once per failed run.
+
+Jobs made with the launchd-jobs plugin (`com.paseo-plugins.launchd-jobs.*`) are adopted when the plugin starts: each gets a new plist on this plugin's label and runner with its run history, log and name, and the old plist is moved to `adopted/` in the plugin's data folder. A job that can't be moved keeps running as before.
+
+The launchd code is ported from [@gpambrozio/paseo-launchd-jobs](https://github.com/gpambrozio/paseo-plugins) 0.6.0 by Gustavo Ambrozio, under the MIT License.
