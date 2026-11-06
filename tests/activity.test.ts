@@ -21,7 +21,14 @@ describe("daily log lines", () => {
       { type: "tool_call", name: "Read" },
       { type: "assistant_message", text: "Three new mails." },
     ]);
-    expect(turn).toEqual({ reply: "Three new mails.", tools: ["apps/COMPOSIO_SEARCH_TOOLS", "Read"] });
+    expect(turn).toEqual({ reply: "Three new mails.", tools: ["apps/COMPOSIO_SEARCH_TOOLS", "Read"], error: null });
+  });
+
+  it("reports a turn that ended on an error item or a provider error message", () => {
+    expect(lastTurn([{ type: "user_message", text: "go" }, { type: "assistant_message", text: "Working." }, { type: "error", message: "Rate limited" }]).error).toBe("Rate limited");
+    expect(lastTurn([{ type: "user_message", text: "go" }, { type: "assistant_message", text: "API Error: 529 overloaded" }]).error).toBe("API Error: 529 overloaded");
+    expect(lastTurn([{ type: "user_message", text: "go" }, { type: "error", message: "Rate limited" }, { type: "assistant_message", text: "Recovered." }]).error).toBeNull();
+    expect(lastTurn([{ type: "user_message", text: "go" }, { type: "assistant_message", text: "The API Error: page is documented." }]).error).toBeNull();
   });
 
   it("writes one folded, redacted line per turn", () => {

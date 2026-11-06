@@ -19,8 +19,8 @@ export async function turnEnded(host: BotsHost, journal: MemoryJournal, schedule
   const { botId } = chat;
   const title = chat.title?.trim() || agent.title?.trim() || "Untitled chat";
   await journal.end(botId, { id: agent.id, title });
-  const { reply, tools } = lastTurn(timeline);
-  if (chat.routineId) await scheduler.finished(chat.routineId, agent.id, outcome, reply);
+  const { reply, tools, error } = lastTurn(timeline);
+  if (chat.routineId) await scheduler.finished(chat.routineId, agent.id, outcome, reply, error);
   if (outcome.kind === "canceled") return;
   const line = logLine({ at: new Date(), chat: title, reply, tools, failure: outcome.kind === "failed" ? outcome.error.message : null });
   if (line) await appendDailyLog(botId, line);

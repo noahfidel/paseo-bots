@@ -37,10 +37,14 @@ interface TimelineItemLike {
   type: string;
   text?: unknown;
   name?: unknown;
+  message?: unknown;
 }
 
-/** The latest turn in a chat's timeline: the bot's last reply and the tools it used. */
-export function lastTurn(items: readonly TimelineItemLike[]): { reply: string; tools: string[] } {
+/** Providers hand API failures back as an ordinary final assistant message starting like this. */
+const PROVIDER_ERROR = /^(API Error\b|Error:)/;
+
+/** The latest turn in a chat's timeline: the bot's last reply, the tools it used, and the error it ended on (if any). */
+export function lastTurn(items: readonly TimelineItemLike[]): { reply: string; tools: string[]; error: string | null } {
   let start = items.length;
   while (start > 0 && items[start - 1]!.type !== "user_message") start--;
   const turn = items.slice(start);
@@ -51,7 +55,10 @@ export function lastTurn(items: readonly TimelineItemLike[]): { reply: string; t
     const label = toolLabel(item.name);
     if (!tools.includes(label) && tools.length < MAX_TOOLS) tools.push(label);
   }
-  return { reply: String(reply?.text ?? ""), tools };
+  const last = [...turn].reverse().find((item) => item.type !== "reasoning");
+  const lastText = String(last?.type === "error" ? (last as { message?: unknown }).message ?? "" : last?.text ?? "").trim();
+  const error = last && (last.type === "error" || (last.type === "assistant_message" && PROVIDER_ERROR.test(lastText))) ? lastText || "The turn ended with an error." : null;
+  return { reply: String(reply?.text ?? ""), tools, error };
 }
 
 const pad = (value: number) => String(value).padStart(2, "0");

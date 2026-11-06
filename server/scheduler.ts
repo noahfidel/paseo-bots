@@ -166,18 +166,20 @@ export class RoutineScheduler {
   }
 
   /** A routine chat's turn ended: record how its run went and update the run's card. */
-  async finished(routineId: string, agentId: string, outcome: PluginTurnOutcome, reply: string): Promise<void> {
+  async finished(routineId: string, agentId: string, outcome: PluginTurnOutcome, reply: string, turnError: string | null = null): Promise<void> {
     const waiting = (record: RoutineRecord | undefined) => [...(record?.runs ?? [])].reverse().find((entry) => entry.agentId === agentId && entry.status === "running");
     // Later turns in a run's chat are just chatting; only the run's own turn counts.
     if (!waiting((await this.status()).routines[routineId])) return;
     const run = await this.update((records) => {
       const found = waiting(records[routineId]);
       if (!found) return null;
+      // A turn can "complete" and still have produced nothing, or only a provider error.
+      const emptyOrErrored = outcome.kind === "completed" ? (turnError ? foldText(turnError, 300) : !reply.trim() ? "Finished without a reply." : null) : null;
       Object.assign(found, {
         endedAt: new Date().toISOString(),
-        status: outcome.kind === "completed" ? "succeeded" : "failed",
+        status: outcome.kind === "completed" && !emptyOrErrored ? "succeeded" : "failed",
         output: reply.trim() ? foldText(reply, 400) : null,
-        error: outcome.kind === "failed" ? outcome.error.message : outcome.kind === "canceled" ? "Stopped before it finished." : null,
+        error: emptyOrErrored ?? (outcome.kind === "failed" ? outcome.error.message : outcome.kind === "canceled" ? "Stopped before it finished." : null),
       });
       return { ...found };
     });
