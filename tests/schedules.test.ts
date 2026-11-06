@@ -18,7 +18,7 @@ const RPC_NAME = /^[a-z][a-z0-9._-]*$/;
 
 describe("schedule RPC contracts", () => {
   it("every defineRpc export is listed, named bots.schedules.*, and installable", () => {
-    const exported = Object.values(schedules).filter(
+    const exported = (Object.values(schedules) as unknown[]).filter(
       (value): value is { name: string } => typeof value === "object" && value !== null && "name" in value && "input" in value && "output" in value,
     );
     expect(exported.length).toBeGreaterThan(0);
