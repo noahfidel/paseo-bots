@@ -32,6 +32,16 @@ export function BotsSettings({ theme, host }: PluginSurfaceProps) {
         onChange={(hideBotChats) => void commit((current) => ({ ...current, hideBotChats }))}
         colors={colors}
       />
+      <SettingsSection title="Schedules" info="The Schedules screen lists bot routines, Paseo schedules and this host's launchd jobs.">
+        <SettingsCard>
+          <SettingsSwitch
+            label="Show launchd jobs"
+            hint="List, run and edit this plugin's launchd jobs (macOS), and alert when one fails."
+            value={values.showLaunchdJobs !== false}
+            onValueChange={(showLaunchdJobs) => void commit((current) => ({ ...current, showLaunchdJobs }))}
+          />
+        </SettingsCard>
+      </SettingsSection>
       <SettingsSection title="Presets" info="Bots you saved with Save as preset in their menu: their identity, instructions, playbooks and skills. They're listed under New bot.">
         <SettingsCard>
           {(values.presets ?? []).length === 0 ? <CardNote colors={colors} text="No presets yet" /> : null}

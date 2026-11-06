@@ -13,6 +13,10 @@ import { BOT_LABEL } from "./shared/bot";
 import { proposalIdOf } from "./shared/proposals";
 import { APP_SIGN_IN_CARD, AppSignInSchema, botListRpc, helloRpc, ROUTINE_RUN_CARD, RoutineRunCardSchema } from "./shared/rpc";
 import { LEARN_COMMAND, learnPrompt } from "./shared/skills";
+import { schedulesAlertsRpc } from "./shared/schedules";
+import { startScheduleAlerts } from "./client/schedules/alerts";
+import { SchedulesScreen } from "./client/schedules/SchedulesScreen";
+import { SCHEDULES_SCREEN_ID, SchedulesSidebarItem } from "./client/schedules/SchedulesSidebarItem";
 
 export default function contribute(client: PluginClientContext) {
   // Hands the daemon side its Paseo API so bot routines can run.
@@ -21,6 +25,20 @@ export default function contribute(client: PluginClientContext) {
   client.addSurface("bots", BotsSurface);
   client.addSidebarItem({ id: "bots", title: "Bots", icon: "Bot", surface: "bots" });
   client.addSettingsScreen({ id: "bots", title: "Bots", icon: "Bot", Component: BotsSettings });
+  // Schedules: bot routines, launchd jobs and Paseo schedules in one screen, opened with params, not intents.
+  client.addScreen({ id: SCHEDULES_SCREEN_ID, title: "Schedules", Component: SchedulesScreen });
+  client.addSidebarHeaderItem({ id: "schedules", title: "Schedules", Component: SchedulesSidebarItem });
+  client.addCommandCenterItem({
+    id: "open-schedules",
+    title: "Schedules: Open",
+    icon: "CalendarClock",
+    keywords: ["schedule", "routine", "launchd", "cron", "job"],
+    context: "global",
+    onSelect({ openScreen }) {
+      openScreen({ screenId: SCHEDULES_SCREEN_ID });
+    },
+  });
+  const stopScheduleAlerts = startScheduleAlerts(() => client.rpc(schedulesAlertsRpc, {}));
   client.addCommandCenterItem({
     id: "open-bots",
     title: "Open Bots",
@@ -103,6 +121,7 @@ export default function contribute(client: PluginClientContext) {
     Component: ({ item, theme }) => <RoutineRunCard colors={theme.colors} card={item.data} />,
   });
   return () => {
+    stopScheduleAlerts();
     stopBotItems();
     removeTooltips();
   };
