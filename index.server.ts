@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { PluginHandlerContext, PluginServerContext } from "@getpaseo/plugin/server";
 import { ensureBotHome, ensureBotsHome, migrateRenamedPluginData } from "./server/bot-home";
 import { turnEnded, turnStarted } from "./server/activity";
@@ -17,6 +18,24 @@ import { Relay } from "./server/relay";
 import { acceptProposal, dismissProposal, getProposal } from "./server/proposals";
 import { BOT_TOOLS } from "./server/tools";
 import { saveUpload } from "./server/uploads";
+import { LaunchdJobs } from "./server/launchd";
+import { adoptLaunchdJobs } from "./server/launchd-adopt";
+import { PaseoCliSchedules, paseoRuns } from "./server/paseo-schedules";
+import { Schedules } from "./server/schedules";
+import {
+  launchdCreateRpc,
+  launchdDeleteRpc,
+  launchdLogRpc,
+  launchdRunRpc,
+  launchdSetEnabledRpc,
+  launchdUpdateRpc,
+  paseoLogsRpc,
+  paseoPauseRpc,
+  paseoResumeRpc,
+  paseoRunOnceRpc,
+  schedulesAlertsRpc,
+  schedulesListRpc,
+} from "./shared/schedules";
 import { botSettings, EMPTY_LIBRARY } from "./shared/bot";
 import { shellCommand } from "./shared/commands";
 import { botSummaries } from "./shared/bot-list";
@@ -171,6 +190,43 @@ export default function contribute(server: PluginServerContext) {
   server.handle(exportTeamRpc, async (input) => exportTeam(input, await library()));
   server.handle(importTeamRpc, importTeam);
   server.handle(uploadRpc, saveUpload);
+
+  // Schedules: bot routines, launchd jobs and Paseo's schedules in one list.
+  const launchd = new LaunchdJobs();
+  const paseoSchedules = new PaseoCliSchedules();
+  const schedules = new Schedules({
+    values: () => host.values(),
+    routineRecords: async () => (await scheduler.status()).routines,
+    launchd,
+    paseo: paseoSchedules,
+    seenPath: join(launchd.env.dataDir, "alerts-seen.json"),
+  });
+  // launchd-jobs' jobs move into this plugin's namespace; a job that can't move keeps running as it was.
+  void adoptLaunchdJobs(launchd)
+    .then((result) => {
+      for (const { from, to } of result.adopted) console.log(`paseo-bots: adopted ${from} as ${to}`);
+      for (const { label, reason } of result.skipped) console.warn(`paseo-bots: didn't adopt ${label} yet: ${reason}`);
+      for (const { label, error } of result.failed) console.error(`paseo-bots: couldn't adopt ${label}; it keeps running as before: ${error}`);
+    })
+    .catch((error: unknown) => console.error("paseo-bots: couldn't adopt launchd-jobs' jobs", error));
+  server.handle(schedulesListRpc, (_input, context) => {
+    attach(context);
+    return schedules.list();
+  });
+  server.handle(schedulesAlertsRpc, (_input, context) => {
+    attach(context);
+    return schedules.alerts();
+  });
+  server.handle(launchdCreateRpc, async (spec) => ({ id: await launchd.create(spec) }));
+  server.handle(launchdUpdateRpc, async ({ id, spec }) => ({ id: await launchd.update(id, spec) }));
+  server.handle(launchdDeleteRpc, async ({ id }) => (await launchd.remove(id), {}));
+  server.handle(launchdRunRpc, async ({ id }) => (await launchd.run(id), {}));
+  server.handle(launchdSetEnabledRpc, async ({ id, enabled }) => (await launchd.setEnabled(id, enabled), {}));
+  server.handle(launchdLogRpc, ({ id }) => launchd.log(id));
+  server.handle(paseoPauseRpc, async ({ id }) => (await paseoSchedules.pause(id), {}));
+  server.handle(paseoResumeRpc, async ({ id }) => (await paseoSchedules.resume(id), {}));
+  server.handle(paseoRunOnceRpc, async ({ id }) => (await paseoSchedules.runOnce(id), {}));
+  server.handle(paseoLogsRpc, async ({ id }) => ({ runs: paseoRuns(await paseoSchedules.inspect(id)) }));
   server.on("agent.turn_started", async (event, context) => {
     host.attach(context.paseo);
     await turnStarted(host, journal, event).catch((error: unknown) => console.error("paseo-bots: couldn't check memory before a turn", error));
