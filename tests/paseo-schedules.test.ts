@@ -3,10 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { LaunchdJobs } from "../server/launchd";
-import { PaseoCliSchedules, paseoItem, paseoRuns, type PaseoSchedule, type PaseoSchedulesClient } from "../server/paseo-schedules";
+import { CachedPaseoSchedules, cliArgs, PaseoCliSchedules, paseoItem, paseoRuns, type PaseoSchedule, type PaseoSchedulesClient } from "../server/paseo-schedules";
 import { launchdItem, routineItems, Schedules } from "../server/schedules";
 import type { BotSettingsValues } from "../shared/bot";
 import type { RoutineRecord } from "../shared/rpc";
+import { PASEO_SCHEDULE_ID, paseoPauseRpc } from "../shared/schedules";
 import { makeBot } from "./helpers";
 
 function schedule(patch: Partial<PaseoSchedule> = {}): PaseoSchedule {
@@ -59,21 +60,73 @@ describe("PaseoCliSchedules", () => {
     const calls: string[][] = [];
     const cli = new PaseoCliSchedules(async (args) => {
       calls.push(args);
-      if (args[0] === "ls") return JSON.stringify([{ id: "sch-1", name: "Morning digest", cadence: "cron:0 9 * * 1-5", status: "active" }]);
-      if (args[0] === "inspect") return JSON.stringify(schedule({ id: args[1]! }));
-      return JSON.stringify({ id: args[1], status: args[0] === "pause" ? "paused" : "active" });
+      if (args[0] === "ls") return JSON.stringify([{ id: "1a2b3c4d", name: "Morning digest", cadence: "cron:0 9 * * 1-5", status: "active" }]);
+      if (args[0] === "inspect") return JSON.stringify(schedule({ id: args[2]! }));
+      return JSON.stringify({ id: args[2], status: args[0] === "pause" ? "paused" : "active" });
     });
     const list = await cli.list();
-    expect(list.map((entry) => entry.id)).toEqual(["sch-1"]);
-    await cli.pause("sch-1");
-    await cli.resume("sch-1");
-    await cli.runOnce("sch-1");
-    expect(calls).toEqual([["ls"], ["inspect", "sch-1"], ["pause", "sch-1"], ["resume", "sch-1"], ["run-once", "sch-1"]]);
+    expect(list.map((entry) => entry.id)).toEqual(["1a2b3c4d"]);
+    await cli.pause("1a2b3c4d");
+    await cli.resume("1a2b3c4d");
+    await cli.runOnce("1a2b3c4d");
+    expect(calls).toEqual([["ls"], ["inspect", "--", "1a2b3c4d"], ["pause", "--", "1a2b3c4d"], ["resume", "--", "1a2b3c4d"], ["run-once", "--", "1a2b3c4d"]]);
+  });
+
+  it("never passes an id that could be read as an option", async () => {
+    const calls: string[][] = [];
+    const cli = new PaseoCliSchedules(async (args) => (calls.push(args), "{}"));
+    for (const id of ["--help", "-h", "", "a b", "../x"]) await expect(cli.pause(id)).rejects.toThrow("isn't a Paseo schedule id");
+    expect(calls).toEqual([]);
+    for (const id of ["--help", "-x", ""]) expect(PASEO_SCHEDULE_ID.test(id)).toBe(false);
+    expect(PASEO_SCHEDULE_ID.test("1a2b3c4d")).toBe(true);
+    expect(paseoPauseRpc.input.safeParse({ id: "--help" }).success).toBe(false);
+    expect(paseoPauseRpc.input.safeParse({ id: "1a2b3c4d" }).success).toBe(true);
+  });
+
+  it("puts options before the id and the id after --", () => {
+    expect(cliArgs(["inspect", "--", "1a2b3c4d"], "/h")).toEqual(["schedule", "inspect", "--home", "/h", "--json", "--", "1a2b3c4d"]);
+    expect(cliArgs(["ls"], undefined)).toEqual(["schedule", "ls", "--json"]);
   });
 
   it("reports a CLI that doesn't return JSON", async () => {
     const cli = new PaseoCliSchedules(async () => "Cannot connect to daemon");
     await expect(cli.list()).rejects.toThrow("didn't return JSON");
+  });
+});
+
+describe("CachedPaseoSchedules", () => {
+  it("runs the CLI list at most once per 30 seconds, and again after a change or a failure", async () => {
+    let clock = 0;
+    let lists = 0;
+    let fail = false;
+    const inner: PaseoSchedulesClient = {
+      list: async () => {
+        lists += 1;
+        if (fail) throw new Error("daemon down");
+        return [schedule()];
+      },
+      inspect: async () => schedule(),
+      pause: async () => {},
+      resume: async () => {},
+      runOnce: async () => {},
+    };
+    const cached = new CachedPaseoSchedules(inner, () => clock);
+    await Promise.all([cached.list(), cached.list()]);
+    clock = 29_999;
+    await cached.list();
+    expect(lists).toBe(1);
+    clock = 30_000;
+    await cached.list();
+    expect(lists).toBe(2);
+    await cached.pause("1a2b3c4d");
+    await cached.list();
+    expect(lists).toBe(3);
+    fail = true;
+    clock = 70_000;
+    await expect(cached.list()).rejects.toThrow("daemon down");
+    fail = false;
+    await cached.list();
+    expect(lists).toBe(5);
   });
 });
 

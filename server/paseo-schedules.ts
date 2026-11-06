@@ -8,7 +8,7 @@ import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { describePaseoCadence, type LastRun, type PaseoRun, type ScheduleItem } from "../shared/schedules";
+import { describePaseoCadence, PASEO_SCHEDULE_ID, type LastRun, type PaseoRun, type ScheduleItem } from "../shared/schedules";
 
 const exec = promisify(execFile);
 
@@ -86,13 +86,18 @@ export function findPaseoCli(): string {
 
 type Runner = (args: string[]) => Promise<string>;
 
+/** The CLI's argv for `[verb, ...rest]`: options before the arguments, and those after "--" when there are any. */
+export function cliArgs(args: string[], paseoHome: string | undefined): string[] {
+  const [verb = "", ...rest] = args;
+  return ["schedule", verb, ...(paseoHome ? ["--home", paseoHome] : []), "--json", ...rest];
+}
+
 function cliRunner(): Runner {
   return async (args) => {
     const binary = findPaseoCli();
     const path = [binary.includes("/") ? dirname(binary) : null, dirname(process.execPath), process.env.PATH].filter(Boolean).join(delimiter);
-    const home = process.env.PASEO_HOME ? ["--home", process.env.PASEO_HOME] : [];
     try {
-      const { stdout } = await exec(binary, ["schedule", ...args, ...home, "--json"], { encoding: "utf8", timeout: 20_000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, PATH: path } });
+      const { stdout } = await exec(binary, cliArgs(args, process.env.PASEO_HOME), { encoding: "utf8", timeout: 20_000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, PATH: path } });
       return stdout;
     } catch (error) {
       const failure = error as { stdout?: string; stderr?: string; message?: string };
@@ -120,19 +125,77 @@ export class PaseoCliSchedules implements PaseoSchedulesClient {
     return Promise.all(rows.map((row) => this.inspect(row.id)));
   }
 
+  /** `<verb> -- <id>`, after checking the id looks like one. */
+  private withId(verb: string, id: string): Promise<unknown> {
+    if (!PASEO_SCHEDULE_ID.test(id)) return Promise.reject(new Error(`"${id}" isn't a Paseo schedule id.`));
+    return this.json([verb, "--", id]);
+  }
+
   async inspect(id: string): Promise<PaseoSchedule> {
-    return PaseoScheduleSchema.parse(await this.json(["inspect", id]));
+    return PaseoScheduleSchema.parse(await this.withId("inspect", id));
   }
 
   async pause(id: string): Promise<void> {
-    await this.json(["pause", id]);
+    await this.withId("pause", id);
   }
 
   async resume(id: string): Promise<void> {
-    await this.json(["resume", id]);
+    await this.withId("resume", id);
   }
 
   async runOnce(id: string): Promise<void> {
-    await this.json(["run-once", id]);
+    await this.withId("run-once", id);
+  }
+}
+
+export const PASEO_LIST_TTL_MS = 30_000;
+
+/**
+ * Keeps `list()` (an `ls` plus one `inspect` per schedule) for 30 seconds, shared
+ * by every client's screen and alert poll; concurrent callers share one fetch.
+ * Pausing, resuming or running a schedule drops it. Failures aren't kept.
+ */
+export class CachedPaseoSchedules implements PaseoSchedulesClient {
+  private cached: { at: number; value: Promise<PaseoSchedule[]> } | null = null;
+
+  constructor(
+    private readonly inner: PaseoSchedulesClient,
+    private readonly now: () => number = Date.now,
+    private readonly ttlMs = PASEO_LIST_TTL_MS,
+  ) {}
+
+  list(): Promise<PaseoSchedule[]> {
+    const at = this.now();
+    if (this.cached && at - this.cached.at < this.ttlMs) return this.cached.value;
+    const entry = { at, value: this.inner.list() };
+    this.cached = entry;
+    entry.value.catch(() => {
+      if (this.cached === entry) this.cached = null;
+    });
+    return entry.value;
+  }
+
+  inspect(id: string): Promise<PaseoSchedule> {
+    return this.inner.inspect(id);
+  }
+
+  private async changed(action: Promise<void>): Promise<void> {
+    try {
+      await action;
+    } finally {
+      this.cached = null;
+    }
+  }
+
+  pause(id: string): Promise<void> {
+    return this.changed(this.inner.pause(id));
+  }
+
+  resume(id: string): Promise<void> {
+    return this.changed(this.inner.resume(id));
+  }
+
+  runOnce(id: string): Promise<void> {
+    return this.changed(this.inner.runOnce(id));
   }
 }

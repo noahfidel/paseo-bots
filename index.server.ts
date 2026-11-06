@@ -20,7 +20,7 @@ import { BOT_TOOLS } from "./server/tools";
 import { saveUpload } from "./server/uploads";
 import { LaunchdJobs } from "./server/launchd";
 import { adoptLaunchdJobs } from "./server/launchd-adopt";
-import { PaseoCliSchedules, paseoRuns } from "./server/paseo-schedules";
+import { CachedPaseoSchedules, PaseoCliSchedules, paseoRuns } from "./server/paseo-schedules";
 import { Schedules } from "./server/schedules";
 import {
   launchdCreateRpc,
@@ -193,7 +193,8 @@ export default function contribute(server: PluginServerContext) {
 
   // Schedules: bot routines, launchd jobs and Paseo's schedules in one list.
   const launchd = new LaunchdJobs();
-  const paseoSchedules = new PaseoCliSchedules();
+  // The screen and every client's alert poll share one Paseo list for 30s.
+  const paseoSchedules = new CachedPaseoSchedules(new PaseoCliSchedules());
   const schedules = new Schedules({
     values: () => host.values(),
     routineRecords: async () => (await scheduler.status()).routines,

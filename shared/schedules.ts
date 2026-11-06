@@ -274,7 +274,13 @@ export const launchdLogRpc = defineRpc({
   output: z.object({ text: z.string(), truncated: z.boolean(), path: z.string(), runs: z.array(RunRecordSchema) }),
 });
 
-const PaseoScheduleId = z.object({ id: z.string().min(1).max(200) });
+/**
+ * Paseo makes schedule ids from 4 random bytes as hex ("1a2b3c4d"). The pattern
+ * allows a little more in case that changes, but never a leading "-", so an id
+ * can't be read as a CLI option.
+ */
+export const PASEO_SCHEDULE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const PaseoScheduleId = z.object({ id: z.string().regex(PASEO_SCHEDULE_ID, "Not a Paseo schedule id.") });
 export const paseoPauseRpc = defineRpc({ name: "bots.schedules.paseo.pause", input: PaseoScheduleId, output: z.object({}) });
 export const paseoResumeRpc = defineRpc({ name: "bots.schedules.paseo.resume", input: PaseoScheduleId, output: z.object({}) });
 export const paseoRunOnceRpc = defineRpc({ name: "bots.schedules.paseo.run-once", input: PaseoScheduleId, output: z.object({}) });
