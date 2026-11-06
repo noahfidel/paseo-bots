@@ -297,6 +297,8 @@ export const botSettings = defineSettings({
     groups: z.array(BotGroupSchema).optional(),
     /** Keep bot chats out of Paseo's own sidebar by giving bots background workspaces. Off when missing. */
     hideBotChats: z.boolean().optional(),
+    /** The Schedules screen lists this host's launchd jobs. On when missing. */
+    showLaunchdJobs: z.boolean().optional(),
   }),
   migrate: (values, fromVersion) => {
     let migrated = values;
