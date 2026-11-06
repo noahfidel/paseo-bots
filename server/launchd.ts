@@ -316,6 +316,19 @@ export class LaunchdJobs {
     return join(this.env.dataDir, "runs", `${slug}.jsonl`);
   }
 
+  /** Where adoption stages a job's plist and its note until the move is done (see launchd-adopt.ts). */
+  get adoptingDir(): string {
+    return join(this.env.dataDir, "adopting");
+  }
+
+  adoptingNotePath(slug: string): string {
+    return join(this.adoptingDir, `${slug}.json`);
+  }
+
+  adoptingPlistPath(slug: string): string {
+    return join(this.adoptingDir, `${this.labelFor(slug)}.plist`);
+  }
+
   get runnerPath(): string {
     return join(this.env.dataDir, RUNNER_NAME);
   }
@@ -586,7 +599,8 @@ export class LaunchdJobs {
     await this.bootoutIfLoaded(label);
     // A disable outlives the plist; clear it so a later job with this slug isn't born paused.
     await this.launchctl(["enable", `${this.domain}/${label}`]).catch((error: unknown) => console.warn(`paseo-bots: couldn't clear the disabled flag for ${label}: ${String(error)}`));
-    for (const path of [this.plistPath(slug), this.logPath(slug), `${this.logPath(slug)}.1`, this.runsPath(slug)]) {
+    // An unfinished adoption's note and staged plist go too, so a later start can't bring the job back.
+    for (const path of [this.adoptingNotePath(slug), this.adoptingPlistPath(slug), this.plistPath(slug), this.logPath(slug), `${this.logPath(slug)}.1`, this.runsPath(slug)]) {
       await unlink(path).catch((error: unknown) => {
         if (!isMissing(error)) throw error;
       });

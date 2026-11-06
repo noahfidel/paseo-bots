@@ -438,6 +438,88 @@ describe.skipIf(!onMac)("adopting launchd-jobs' jobs", () => {
     expect(firstCreate).toBeGreaterThan(lastAdoption);
   });
 
+  it("never writes over an adopted job or its backup when launchd-jobs makes the same job again", async () => {
+    seedOldJob();
+    await adoptLaunchdJobs(jobs);
+    const firstPlist = readFileSync(jobs.plistPath(OLD_SLUG), "utf8");
+    const firstBackup = join(env.dataDir, "adopted", `${OLD_LABEL}.plist`);
+    const firstBackupText = readFileSync(firstBackup, "utf8");
+
+    const { oldPlist } = seedOldJob();
+    const result = await adoptLaunchdJobs(jobs);
+    expect(result.adopted).toEqual([{ from: OLD_LABEL, to: `${NEW_LABEL}-2` }]);
+    expect(readFileSync(jobs.plistPath(OLD_SLUG), "utf8")).toBe(firstPlist);
+    expect(readFileSync(firstBackup, "utf8")).toBe(firstBackupText);
+    expect(existsSync(join(env.dataDir, "adopted", `${OLD_LABEL}-2.plist`))).toBe(true);
+    expect(existsSync(oldPlist)).toBe(false);
+    expect(fake.loaded.has(NEW_LABEL)).toBe(true);
+    expect(fake.loaded.has(`${NEW_LABEL}-2`)).toBe(true);
+  });
+
+  it("keeps the new plist when neither the old plist nor its backup is left to restore", async () => {
+    seedOldJob();
+    fake.refuse.add(NEW_LABEL);
+    const backup = join(env.dataDir, "adopted", `${OLD_LABEL}.plist`);
+    fake.beforeCall = () => {
+      if (fake.calls.at(-1)?.[0] === "bootstrap") rmSync(backup, { force: true });
+    };
+    expect((await adoptLaunchdJobs(jobs)).failed).toHaveLength(1);
+    expect(existsSync(jobs.plistPath(OLD_SLUG))).toBe(true);
+    expect(existsSync(jobs.adoptingNotePath(OLD_SLUG))).toBe(true);
+  });
+
+  it("puts the new plist out of LaunchAgents before the old one comes back", async () => {
+    const { oldPlist } = seedOldJob();
+    fake.refuse.add(NEW_LABEL);
+    fake.refuseTimes.set(OLD_LABEL, 1);
+    const both = neverBoth(oldPlist);
+    expect((await adoptLaunchdJobs(jobs)).failed).toHaveLength(1);
+    expect(both).toEqual([]);
+    expect(fake.loaded.has(OLD_LABEL)).toBe(true);
+    expect(existsSync(jobs.adoptingNotePath(OLD_SLUG))).toBe(false);
+  });
+
+  it("drops a leftover note for a finished move without touching launchd", async () => {
+    seedOldJob();
+    await adoptLaunchdJobs(jobs);
+    writeFileSync(jobs.adoptingNotePath(OLD_SLUG), JSON.stringify({ from: OLD_LABEL, slug: OLD_SLUG, load: true, disable: false, backup: `${OLD_LABEL}.plist` }));
+    const before = fake.calls.length;
+    expect(await adoptLaunchdJobs(jobs)).toEqual({ adopted: [], skipped: [], failed: [] });
+    expect(fake.calls.slice(before).map((call) => call[0])).not.toContain("bootout");
+    expect(fake.calls.slice(before).map((call) => call[0])).not.toContain("bootstrap");
+    expect(existsSync(jobs.adoptingNotePath(OLD_SLUG))).toBe(false);
+    expect(fake.loaded.has(NEW_LABEL)).toBe(true);
+  });
+
+  it("leaves a running new job alone when finishing a move, and keeps the note", async () => {
+    seedOldJob();
+    fake.crashAfter = (args) => args[0] === "bootout" && args[1]!.endsWith(NEW_LABEL);
+    void adoptLaunchdJobs(jobs);
+    await vi.waitFor(() => expect(fake.calls.some((call) => call[0] === "bootout" && call[1]!.endsWith(NEW_LABEL))).toBe(true));
+    fake.crashAfter = null;
+    fake.loaded.set(NEW_LABEL, { path: jobs.plistPath(OLD_SLUG), running: true });
+    const before = fake.calls.length;
+    const result = await adoptLaunchdJobs(new LaunchdJobs(env));
+    expect(result.skipped.map((entry) => entry.label)).toEqual([OLD_LABEL]);
+    expect(fake.calls.slice(before).filter((call) => call[0] === "bootout" || call[0] === "bootstrap")).toEqual([]);
+    expect(existsSync(jobs.adoptingNotePath(OLD_SLUG))).toBe(true);
+  });
+
+  it("doesn't bring back a job deleted while its move was unfinished", async () => {
+    const { oldPlist } = seedOldJob();
+    fake.crashAfter = (args) => args[0] === "bootout" && args[1]!.endsWith(NEW_LABEL);
+    void adoptLaunchdJobs(jobs);
+    await vi.waitFor(() => expect(fake.calls.some((call) => call[0] === "bootout" && call[1]!.endsWith(NEW_LABEL))).toBe(true));
+    fake.crashAfter = null;
+    const fresh = new LaunchdJobs(env);
+    await fresh.remove(OLD_SLUG);
+    expect(existsSync(fresh.adoptingNotePath(OLD_SLUG))).toBe(false);
+    expect(await adoptLaunchdJobs(fresh)).toEqual({ adopted: [], skipped: [], failed: [] });
+    expect(existsSync(oldPlist)).toBe(false);
+    expect(existsSync(fresh.plistPath(OLD_SLUG))).toBe(false);
+    expect(fake.loaded.size).toBe(0);
+  });
+
   it("leaves a running job for a later start", async () => {
     const { oldPlist } = seedOldJob({ running: true });
     const result = await adoptLaunchdJobs(jobs);
