@@ -235,6 +235,43 @@ export const ScheduleItemSchema = z.object({
 });
 export type ScheduleItem = z.infer<typeof ScheduleItemSchema>;
 
+// ---------------------------------------------------------------- type filter
+
+export type ScheduleFilter = "all" | ScheduleKind;
+
+const FILTER_LABELS: Record<ScheduleKind, string> = { routine: "Bot routines", launchd: "launchd", paseo: "Paseo" };
+
+export const SCHEDULE_FILTER_EMPTY: Record<ScheduleFilter, string> = {
+  all: "Nothing is scheduled yet.",
+  routine: "No bot routines yet.",
+  launchd: "No launchd jobs yet.",
+  paseo: "No Paseo schedules yet.",
+};
+
+/** The items of one kind, or all of them. */
+export function filterSchedules(items: readonly ScheduleItem[], filter: ScheduleFilter): ScheduleItem[] {
+  return filter === "all" ? [...items] : items.filter((item) => item.kind === filter);
+}
+
+/** The chips to show, in order, with each kind's count. The launchd chip is left out when launchd isn't shown. */
+export function filterChoices(items: readonly ScheduleItem[], launchdShown: boolean): { value: ScheduleFilter; label: string }[] {
+  const kinds = SCHEDULE_KINDS.filter((kind) => launchdShown || kind !== "launchd");
+  return [
+    { value: "all", label: "All" },
+    ...kinds.map((kind) => ({ value: kind, label: `${FILTER_LABELS[kind]} (${items.filter((item) => item.kind === kind).length})` })),
+  ];
+}
+
+/** A saved choice that no longer has a chip (launchd turned off) becomes All. */
+export function resolveScheduleFilter(saved: ScheduleFilter, launchdShown: boolean): ScheduleFilter {
+  return saved === "launchd" && !launchdShown ? "all" : saved;
+}
+
+/** Reads a stored choice; anything unknown is All. */
+export function parseScheduleFilter(raw: string | null): ScheduleFilter {
+  return (SCHEDULE_KINDS as readonly string[]).includes(raw ?? "") ? (raw as ScheduleKind) : "all";
+}
+
 export const schedulesListRpc = defineRpc({
   name: "bots.schedules.list",
   input: z.object({}),

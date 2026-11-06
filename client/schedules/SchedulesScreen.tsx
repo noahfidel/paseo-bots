@@ -3,11 +3,16 @@ import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useToast } from "@getpaseo/plugin/client/react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { routineRunNowRpc } from "../../shared/rpc";
 import {
+  filterChoices,
+  filterSchedules,
   KIND_LABELS,
+  parseScheduleFilter,
+  resolveScheduleFilter,
+  SCHEDULE_FILTER_EMPTY,
   launchdDeleteRpc,
   launchdLogRpc,
   launchdRunRpc,
@@ -18,9 +23,11 @@ import {
   paseoRunOnceRpc,
   relativeTime,
   schedulesListRpc,
+  type ScheduleFilter,
   type ScheduleItem,
   type ScheduleKind,
 } from "../../shared/schedules";
+import { readItem, writeItem } from "../chat/composer/storage";
 import { CONTENT_MAX_WIDTH, confirmDialog, errorText, MONO_FONT, nativeTokens } from "../native";
 import { Alert, Button, CardNote, StatusBadge, type BadgeVariant } from "../panel/controls";
 import { ui } from "../typography";
@@ -30,6 +37,8 @@ import { JobEditor, type EditorTarget } from "./JobEditor";
 
 type Colors = PluginTheme["colors"];
 const LIST_KEY = ["paseo-bots", "schedules"];
+/** Per device (localStorage on web and desktop, AsyncStorage on phones), not in the bot settings. */
+const FILTER_STORAGE_KEY = "@paseo-bots:schedules-filter";
 
 const KIND_VARIANT: Record<ScheduleKind, BadgeVariant> = { routine: "success", launchd: "warning", paseo: "muted" };
 
@@ -58,6 +67,18 @@ export function SchedulesScreen({ theme, layout, navigation }: PluginScreenProps
   const [editor, setEditor] = useState<EditorTarget | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [savedFilter, setSavedFilter] = useState<ScheduleFilter>("all");
+  useEffect(() => {
+    let alive = true;
+    void readItem(FILTER_STORAGE_KEY).then((raw) => alive && setSavedFilter(parseScheduleFilter(raw)));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const chooseFilter = (next: ScheduleFilter) => {
+    setSavedFilter(next);
+    void writeItem(FILTER_STORAGE_KEY, next);
+  };
   const { commit } = useBotSettings();
   const refresh = () => queryClient.invalidateQueries({ queryKey: LIST_KEY });
 
@@ -138,6 +159,8 @@ export function SchedulesScreen({ theme, layout, navigation }: PluginScreenProps
   };
 
   const data = query.data;
+  const filter = resolveScheduleFilter(savedFilter, data?.launchd.shown ?? true);
+  const visible = data ? filterSchedules(data.items, filter) : [];
   const now = new Date();
   const padding = layout.compact ? 16 : 24;
   return (
@@ -147,12 +170,19 @@ export function SchedulesScreen({ theme, layout, navigation }: PluginScreenProps
         <Button colors={colors} label="Refresh" size="sm" variant="ghost" icon="RefreshCw" loading={query.isFetching} onPress={() => void refresh()} />
         {data?.launchd.shown ? <Button colors={colors} label="New launchd job" size="sm" variant="default" icon="Plus" onPress={() => setEditor({ mode: "create" })} /> : null}
       </View>
+      {data ? (
+        <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
+          {filterChoices(data.items, data.launchd.shown).map((choice) => (
+            <Button key={choice.value} colors={colors} label={choice.label} size="xs" variant={choice.value === filter ? "default" : "outline"} onPress={() => chooseFilter(choice.value)} />
+          ))}
+        </View>
+      ) : null}
       {query.error ? <Alert colors={colors} variant="error" title="Couldn't load schedules" description={errorText(query.error)} /> : null}
       {data?.paseo.error ? <Alert colors={colors} variant="warning" title="Paseo schedules aren't listed" description={data.paseo.error} /> : null}
       {data?.launchd.error ? <Alert colors={colors} variant="warning" title="launchd jobs aren't listed" description={data.launchd.error} /> : null}
       {!data && !query.error ? <CardNote colors={colors} text="Loading..." loading /> : null}
-      {data && data.items.length === 0 ? <CardNote colors={colors} text="Nothing is scheduled yet." /> : null}
-      {data?.items.map((item) => (
+      {data && visible.length === 0 ? <CardNote colors={colors} text={SCHEDULE_FILTER_EMPTY[filter]} /> : null}
+      {visible.map((item) => (
         <ScheduleRow key={item.key} colors={colors} item={item} now={now} actions={actions(item)} expanded={expanded === item.key} openChat={openChat} />
       ))}
       {editor ? (
