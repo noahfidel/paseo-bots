@@ -4,6 +4,7 @@ import { BotsSurface } from "./client/BotsSurface";
 import { NativeConnectCard } from "./client/chat/stream/ConnectCard";
 import { ProposalCard } from "./client/chat/stream/ProposalCard";
 import { RoutineRunCard } from "./client/chat/stream/RoutineRunCard";
+import { installAvatarRegistry } from "./client/avatar-registry";
 import { startBotItems } from "./client/bot-items";
 import { requestIntent } from "./client/intent";
 import { openBotChat, OPEN_CHAT_SCREEN_ID } from "./client/open-chat";
@@ -86,6 +87,11 @@ export default function contribute(client: PluginClientContext) {
         },
       }),
   });
+  // Bot avatars for other plugins (the workspace switcher), on globalThis.__paseoBotsAvatars; see docs/avatars-api.md.
+  const stopAvatars = installAvatarRegistry({
+    fetch: async () => (await client.rpc(botListRpc, {})).bots,
+    intervalMs: 60_000,
+  });
   // The blank screen those items open to hand a new chat to Paseo's chat view. No sidebar item or Command Center entry.
   // Paseo rejects a screen with an empty title, which would stop everything registered after it.
   client.addScreen({ id: OPEN_CHAT_SCREEN_ID, title: "Opening chat", Component: OpenChatScreen });
@@ -135,6 +141,7 @@ export default function contribute(client: PluginClientContext) {
   return () => {
     stopScheduleAlerts();
     stopBotItems();
+    stopAvatars();
     removeTooltips();
   };
 }

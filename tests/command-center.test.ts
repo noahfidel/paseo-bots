@@ -45,7 +45,7 @@ describe("botSummaries", () => {
   it("returns only what the Command Center needs", () => {
     const values = { bots: [makeBot({ id: "a", name: "Ada", title: "Helper", soul: "secret instructions", archived: true })] };
     const result = botSummaries(values);
-    expect(result).toEqual([{ id: "a", name: "Ada", title: "Helper", archived: true }]);
+    expect(result).toEqual([{ id: "a", name: "Ada", title: "Helper", archived: true, avatar: { seed: "s", palette: null, shape: "circle", imageUrl: null } }]);
     expect(BotListSchema.parse({ bots: result }).bots[0]).not.toHaveProperty("soul");
   });
 });

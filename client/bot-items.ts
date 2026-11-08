@@ -31,6 +31,12 @@ export function notifyBotsChanged(): void {
   for (const listener of [...changeListeners]) listener();
 }
 
+/** Runs the callback whenever mounted components report a settings change; returns the unsubscribe. */
+export function onBotsChanged(listener: () => void): () => void {
+  changeListeners.add(listener);
+  return () => changeListeners.delete(listener);
+}
+
 /** Keeps one Command Center registration per item; returns the cleanup. A failed fetch keeps the current items. */
 export function startBotItems({
   fetch,
