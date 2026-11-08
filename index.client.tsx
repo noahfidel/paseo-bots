@@ -87,7 +87,8 @@ export default function contribute(client: PluginClientContext) {
       }),
   });
   // The blank screen those items open to hand a new chat to Paseo's chat view. No sidebar item or Command Center entry.
-  client.addScreen({ id: OPEN_CHAT_SCREEN_ID, title: "", Component: OpenChatScreen });
+  // Paseo rejects a screen with an empty title, which would stop everything registered after it.
+  client.addScreen({ id: OPEN_CHAT_SCREEN_ID, title: "Opening chat", Component: OpenChatScreen });
   // Bot chats opened in Paseo's own agent view get the same /learn and skill cards.
   client.addSlashCommand({
     ...LEARN_COMMAND,
