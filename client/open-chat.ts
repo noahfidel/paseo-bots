@@ -10,22 +10,56 @@ import type { SurfaceIntent } from "./intent";
 /** The blank screen that opens a chat in Paseo's chat view; params `agentId` and `botId`. */
 export const OPEN_CHAT_SCREEN_ID = "open-chat";
 
+/** How long the Command Center waits for the chat before opening the Bots screen instead. */
+const START_TIMEOUT_MS = 5_000;
+
 export interface OpenBotChatDeps {
   /** Starts the bot's chat for Paseo's chat view (the `bots.open-chat` RPC). */
   start(botId: string): Promise<OpenChatResult>;
   openScreen(input: PluginOpenScreenInput): void;
   /** Opens the Bots screen with the intent. */
   openBots(intent: Extract<SurfaceIntent, { kind: "new-chat" }>): void;
+  /** Tests shorten it. */
+  timeoutMs?: number;
 }
 
-export async function openBotChat(botId: string, deps: OpenBotChatDeps): Promise<void> {
-  let result: OpenChatResult;
-  try {
-    result = await deps.start(botId);
-  } catch (error) {
-    deps.openBots({ kind: "new-chat", botId, error: error instanceof Error ? error.message : String(error) });
-    return;
-  }
-  if (result.kind === "bots-screen") deps.openBots({ kind: "new-chat", botId });
-  else deps.openScreen({ screenId: OPEN_CHAT_SCREEN_ID, params: { agentId: result.agentId, botId } });
+/** Bots whose chat is being started, so pressing the item again doesn't start a second, empty one. */
+const starting = new Map<string, Promise<void>>();
+
+/**
+ * The Bots screen opens, as before, when the setting is off, the RPC fails (an older daemon
+ * build, a restart) or takes longer than five seconds; then a chat that arrives late doesn't
+ * open too. The error shows only when the daemon tried to start the chat and failed.
+ */
+export function openBotChat(botId: string, deps: OpenBotChatDeps): Promise<void> {
+  const current = starting.get(botId);
+  if (current) return current;
+  const run = startAndOpen(botId, deps).finally(() => starting.delete(botId));
+  starting.set(botId, run);
+  return run;
+}
+
+async function startAndOpen(botId: string, deps: OpenBotChatDeps): Promise<void> {
+  let settled = false;
+  const timer = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    deps.openBots({ kind: "new-chat", botId });
+  }, deps.timeoutMs ?? START_TIMEOUT_MS);
+  const started = deps.start(botId).then(
+    (result) => {
+      if (settled) return;
+      settled = true;
+      if (result.kind === "chat") deps.openScreen({ screenId: OPEN_CHAT_SCREEN_ID, params: { agentId: result.agentId, botId } });
+      else deps.openBots({ kind: "new-chat", botId, ...(result.error ? { error: result.error } : {}) });
+    },
+    () => {
+      if (settled) return;
+      settled = true;
+      deps.openBots({ kind: "new-chat", botId });
+    },
+  );
+  // Waits for the chat even after the timeout, so the in-flight guard holds until it exists.
+  await started;
+  clearTimeout(timer);
 }

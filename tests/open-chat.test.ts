@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { openBotChat, OPEN_CHAT_SCREEN_ID } from "../client/open-chat";
 import { openBotSelection, takeIntent, type SurfaceIntent } from "../client/intent";
 import { BOT_LABEL, opensChatsInPaseo, type Bot, type Playbook } from "../shared/bot";
@@ -92,6 +92,14 @@ describe("openChat on the server", () => {
     expect(workspaces).toEqual([{ background: true }]);
   });
 
+  it("reports a chat it tried and failed to start", async () => {
+    const { openChat } = await import("../server/chats");
+    const host = fakeHost([makeBot({ id: "inbox", model: "m" })]);
+    // Paseo isn't attached, so starting the chat fails.
+    const result = await openChat(host, fakeRelay as never, "inbox");
+    expect(result).toEqual({ kind: "bots-screen", error: expect.stringContaining("isn't connected to Paseo") });
+  });
+
   it("leaves it to the Bots screen when the setting is off, the bot is on another host, or it's gone", async () => {
     const { openChat } = await import("../server/chats");
     const off = setup([makeBot({ id: "inbox", model: "m" })], { openCommandChatsInPaseo: false });
@@ -100,6 +108,13 @@ describe("openChat on the server", () => {
     const remote = setup([makeBot({ id: "inbox", model: "m", hostId: "other" })]);
     expect(await openChat(remote.host, fakeRelay as never, "inbox")).toEqual({ kind: "bots-screen" });
     expect(await openChat(remote.host, fakeRelay as never, "gone")).toEqual({ kind: "bots-screen" });
+    // Settings not ready, or the setting off before Paseo is attached: no error, just the Bots screen.
+    const { BotsHost } = await import("../server/host");
+    const loading = new BotsHost({ read: async () => ({ status: "loading" }) } as never);
+    expect(await openChat(loading, fakeRelay as never, "inbox")).toEqual({ kind: "bots-screen" });
+    const detached = fakeHost([makeBot({ id: "inbox", model: "m" })]);
+    Object.assign((await detached.values()) as object, { openCommandChatsInPaseo: false });
+    expect(await openChat(detached, fakeRelay as never, "inbox")).toEqual({ kind: "bots-screen" });
     expect(off.created).toEqual([]);
     expect(remote.created).toEqual([]);
   });
@@ -108,13 +123,18 @@ describe("openChat on the server", () => {
 describe("New chat with <Bot> in the Command Center", () => {
   afterEach(() => {
     takeIntent();
+    vi.useRealTimers();
   });
 
-  const run = async (start: () => Promise<unknown>) => {
+  const recorder = () => {
     const screens: unknown[] = [];
     const bots: SurfaceIntent[] = [];
-    await openBotChat("inbox", { start: start as never, openScreen: (input) => screens.push(input), openBots: (intent) => bots.push(intent) });
-    return { screens, bots };
+    return { screens, bots, deps: (start: () => Promise<unknown>, timeoutMs?: number) => ({ start: start as never, openScreen: (input: unknown) => screens.push(input), openBots: (intent: SurfaceIntent) => bots.push(intent), ...(timeoutMs ? { timeoutMs } : {}) }) };
+  };
+  const run = async (start: () => Promise<unknown>) => {
+    const record = recorder();
+    await openBotChat("inbox", record.deps(start) as never);
+    return record;
   };
 
   it("opens the new chat through the redirect screen", async () => {
@@ -129,9 +149,50 @@ describe("New chat with <Bot> in the Command Center", () => {
     expect(bots).toEqual([{ kind: "new-chat", botId: "inbox" }]);
   });
 
-  it("opens the Bots screen with the error when the chat couldn't start", async () => {
-    const { bots } = await run(async () => Promise.reject(new Error("Paseo is offline")));
+  it("shows the error only when the server tried and failed to start the chat", async () => {
+    const { bots } = await run(async () => ({ kind: "bots-screen", error: "Paseo is offline" }));
     expect(bots).toEqual([{ kind: "new-chat", botId: "inbox", error: "Paseo is offline" }]);
+  });
+
+  it("opens the Bots screen without an error when the RPC itself fails", async () => {
+    const { bots } = await run(async () => Promise.reject(new Error("Unknown RPC bots.open-chat")));
+    expect(bots).toEqual([{ kind: "new-chat", botId: "inbox" }]);
+  });
+
+  it("opens the Bots screen after 5 seconds and ignores a chat that arrives later", async () => {
+    vi.useFakeTimers();
+    let finish: (value: unknown) => void = () => {};
+    const record = recorder();
+    const done = openBotChat("inbox", record.deps(() => new Promise((resolve) => (finish = resolve))) as never);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(record.bots).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(record.bots).toEqual([{ kind: "new-chat", botId: "inbox" }]);
+    finish({ kind: "chat", agentId: "late" });
+    await done;
+    expect(record.screens).toEqual([]);
+    expect(record.bots).toHaveLength(1);
+  });
+
+  it("doesn't start a second chat for a bot while one is being started", async () => {
+    let finish: (value: unknown) => void = () => {};
+    let starts = 0;
+    const record = recorder();
+    const start = () => {
+      starts++;
+      return new Promise((resolve) => (finish = resolve));
+    };
+    const first = openBotChat("inbox", record.deps(start) as never);
+    const second = openBotChat("inbox", record.deps(start) as never);
+    finish({ kind: "chat", agentId: "agent-1" });
+    await Promise.all([first, second]);
+    expect(starts).toBe(1);
+    expect(record.screens).toHaveLength(1);
+    // Once it's done, the next press starts a new chat.
+    const third = openBotChat("inbox", record.deps(start) as never);
+    finish({ kind: "chat", agentId: "agent-2" });
+    await third;
+    expect(starts).toBe(2);
   });
 
   it("selects a chat that was already created when the Bots screen takes over", () => {

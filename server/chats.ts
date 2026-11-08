@@ -44,13 +44,18 @@ export async function startChat(host: BotsHost, relay: Relay, bot: Bot, input: {
 /**
  * "New chat with <Bot>" from the Command Center: starts the bot's chat with no
  * message for Paseo's own chat view. The Bots screen takes over, as before, when
- * the setting is off or the bot isn't one this host can start (on another host, or gone).
+ * the setting is off, the settings aren't ready, or the bot isn't one this host can
+ * start (on another host, or gone); those are checked before anything can fail. A
+ * chat that was tried and failed comes back as the Bots screen with the error.
  */
 export async function openChat(host: BotsHost, relay: Relay, botId: string): Promise<OpenChatResult> {
-  const values = await host.values();
-  if (!values) throw new Error("The bots settings aren't ready yet. Try again in a moment.");
-  if (!opensChatsInPaseo(values)) return { kind: "bots-screen" };
+  const values = await host.values().catch(() => null);
+  if (!values || !opensChatsInPaseo(values)) return { kind: "bots-screen" };
   const bot = values.bots.find((entry) => entry.id === botId);
   if (!bot || bot.archived || bot.hostId) return { kind: "bots-screen" };
-  return { kind: "chat", agentId: await startChat(host, relay, bot, {}) };
+  try {
+    return { kind: "chat", agentId: await startChat(host, relay, bot, {}) };
+  } catch (error) {
+    return { kind: "bots-screen", error: error instanceof Error ? error.message : String(error) };
+  }
 }
