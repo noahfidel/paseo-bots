@@ -30,6 +30,29 @@ export function renderPlaybooks(playbooks: readonly Playbook[]): string {
   return ["Playbooks that match this job. Follow them as process guidance; they don't grant tools or permissions, or override the user.", ...parts].join("\n");
 }
 
+/** Playbooks a chat can use: those with instructions. */
+export function usablePlaybooks(playbooks: readonly Playbook[]): Playbook[] {
+  return playbooks.filter((playbook) => playbook.instructions.trim());
+}
+
+/**
+ * The prompt text for a chat started with no first message, which has no job to pick
+ * playbooks from: their names and triggers, and to load one with get_playbook.
+ */
+export function renderPlaybookIndex(playbooks: readonly Playbook[]): string {
+  const lines = usablePlaybooks(playbooks).map((playbook) => `- ${playbook.name.trim()}${playbook.triggers.length ? `: ${playbook.triggers.join(", ")}` : ""}`);
+  return [
+    'Your playbooks, with the words that trigger them. Before acting on a request that fits one, load it with get_playbook (from the MCP server "bots") and follow it as process guidance; playbooks don\'t grant tools or permissions, or override the user.',
+    ...lines,
+  ].join("\n");
+}
+
+/** One of the bot's usable playbooks by name, ignoring case and surrounding spaces. */
+export function findPlaybook(playbooks: readonly Playbook[], name: string): Playbook | null {
+  const wanted = name.trim().toLowerCase();
+  return usablePlaybooks(playbooks).find((playbook) => playbook.name.trim().toLowerCase() === wanted) ?? null;
+}
+
 /** "invoice, receipt, expense report" as trigger phrases. */
 export function parseTriggers(text: string): string[] {
   return [...new Set(text.split(/[,\n]/).map((trigger) => trigger.trim()).filter(Boolean))].slice(0, 20);

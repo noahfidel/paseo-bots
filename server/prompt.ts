@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import type { PaseoApi } from "./paseo";
 import { recentWork } from "../shared/activity";
-import { selectPlaybooks } from "../shared/playbooks";
+import { selectPlaybooks, usablePlaybooks } from "../shared/playbooks";
 import { paseoToolsState, type PaseoToolsConfig } from "../shared/paseo-tools";
 import type { AppAccount, PromptApp } from "../shared/apps";
 import { accounts, catalog, readState } from "./composio";
@@ -31,6 +31,11 @@ async function botApps(bot: Bot): Promise<PromptApp[]> {
 export interface ChatStart {
   /** The chat's first message, which picks the playbooks. */
   message?: string;
+  /**
+   * A chat started with no first message: instead of picking playbooks, list them
+   * for get_playbook. Only bots on this host get that tool, so only they get the list.
+   */
+  indexPlaybooks?: boolean;
   /** The bot's team and every bot, when it's on one. */
   team?: { group: BotGroup; bots: Bot[] };
 }
@@ -41,7 +46,7 @@ export interface ChatStart {
  */
 export async function promptContext(bot: Bot, local: boolean, library: Library, paseoTools: boolean, start: ChatStart = {}): Promise<PromptContext> {
   // Playbooks and teams live in the settings, so they travel with the bot to any host.
-  const playbooks = selectPlaybooks(start.message ?? "", bot.playbooks);
+  const playbooks = start.indexPlaybooks ? [] : selectPlaybooks(start.message ?? "", bot.playbooks);
   const team = start.team ? teamPrompt(start.team.group, bot, start.team.bots) : null;
   // Connected apps go through this host's relay, so bots on other hosts can't reach them.
   if (!local) return { memory: "", memoryPath: null, recentWork: [], playbooks, team, skills: [], paseoTools, botTools: false, apps: [] };
@@ -59,6 +64,7 @@ export async function promptContext(bot: Bot, local: boolean, library: Library, 
     memoryPath: join(memoryFolder(bot.id), MAIN_MEMORY),
     recentWork: recentWork(await recentLogEntries(bot.id, 3), new Date()),
     playbooks,
+    playbookIndex: start.indexPlaybooks ? usablePlaybooks(bot.playbooks) : [],
     team,
     skills: skills.map((skill) => ({ name: skill.id, description: skill.description, path: paths.get(skill.id)! })),
     paseoTools,
@@ -79,9 +85,18 @@ async function paseoToolsOn(paseo: PaseoApi | null, provider: string): Promise<b
 }
 
 /** The system prompt for a new chat; `settings` supplies the bot's team. */
-export async function systemPrompt({ bot, local, message }: { bot: Bot; local: boolean; message?: string }, library: Library, paseo: PaseoApi | null, settings?: BotSettingsValues | null) {
+export async function systemPrompt(
+  { bot, local, message, indexPlaybooks }: { bot: Bot; local: boolean; message?: string; indexPlaybooks?: boolean },
+  library: Library,
+  paseo: PaseoApi | null,
+  settings?: BotSettingsValues | null,
+) {
   const group = teamOf(bot.id, settings?.groups ?? []);
-  const start: ChatStart = { ...(message !== undefined ? { message } : {}), ...(group && settings ? { team: { group, bots: settings.bots } } : {}) };
+  const start: ChatStart = {
+    ...(message !== undefined ? { message } : {}),
+    ...(indexPlaybooks ? { indexPlaybooks } : {}),
+    ...(group && settings ? { team: { group, bots: settings.bots } } : {}),
+  };
   // Another host's config isn't readable from here; Paseo gives agents its tools by default.
   const context = await promptContext(bot, local, library, local ? await paseoToolsOn(paseo, bot.provider) : true, start);
   return { systemPrompt: composeSystemPrompt(bot, context), sections: promptSections(bot, context) };

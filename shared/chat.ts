@@ -44,7 +44,7 @@ interface WorkspaceHandle {
       agentId?: string;
       config: ReturnType<typeof buildAgentConfig>;
       labels: Record<string, string>;
-      prompt: string;
+      prompt?: string;
       title?: string;
       images?: { data: string; mimeType: string }[];
       attachments?: WireAttachment[];
@@ -231,7 +231,8 @@ export interface StartChatInput {
   placement: BotPlacement;
   /** Keep the chat out of Paseo's sidebar (the "Hide bot chats from Paseo's sidebar" setting). */
   hideFromSidebar?: boolean;
-  prompt: string;
+  /** The first message. Without one the chat waits, empty, for the user's. */
+  prompt?: string;
   systemPrompt: string;
   /** Defaults to Paseo's own title derived from the prompt. */
   title?: string;
@@ -243,7 +244,7 @@ export interface StartChatInput {
 
 /**
  * Starts a chat (a thread in the bot's workspace) with the bot's configuration
- * and sends the first message. Used by the app and by the routine scheduler.
+ * and sends the first message, if any. Used by the app and by the routine scheduler.
  */
 export async function startBotChat(api: ChatApi, input: StartChatInput): Promise<string> {
   const { bot } = input;
@@ -253,7 +254,7 @@ export async function startBotChat(api: ChatApi, input: StartChatInput): Promise
     ...(input.agentId ? { agentId: input.agentId } : {}),
     config: buildAgentConfig(bot, input.library, model, input.systemPrompt, input.plugin),
     labels: { [BOT_LABEL]: bot.id, ...input.labels },
-    prompt: input.prompt,
+    ...(input.prompt !== undefined ? { prompt: input.prompt } : {}),
     ...(input.title ? { title: input.title.slice(0, MAX_TITLE_CHARS) } : {}),
     ...(input.images?.length ? { images: input.images } : {}),
     ...(input.attachments?.length ? { attachments: input.attachments } : {}),

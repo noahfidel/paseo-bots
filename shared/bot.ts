@@ -3,7 +3,7 @@ import { z } from "zod";
 import { APPS_MCP_NAME, appsPrompt, type PromptApp } from "./apps";
 import { botToolsPrompt, QUIET_TOOLS, supportsToolGrants, TOOLS_MCP_NAME } from "./bot-tools";
 import { PASEO_MCP_NAME, PASEO_TOOLS_PROMPT } from "./paseo-tools";
-import { renderPlaybooks } from "./playbooks";
+import { renderPlaybookIndex, renderPlaybooks } from "./playbooks";
 
 /** Agent label carrying the bot id. Chats are found by filtering on it. */
 export const BOT_LABEL = "paseo-bots.bot";
@@ -451,6 +451,8 @@ export interface PromptContext {
   recentWork: string[];
   /** Playbooks whose triggers appear in the chat's first message. */
   playbooks: Playbook[];
+  /** A chat started with no first message: the playbooks it may load with get_playbook. */
+  playbookIndex?: Playbook[];
   /** In a team's chat, the lead's view of the team (teamPrompt). */
   team?: string | null;
   /** The bot's usable skills with the SKILL.md path the agent should read. Empty when the files aren't on the bot's host. */
@@ -506,6 +508,7 @@ export function promptSections(bot: Bot, context: PromptContext): PromptSection[
     });
   }
   if (context.playbooks.length > 0) sections.push({ title: "Playbooks", text: renderPlaybooks(context.playbooks) });
+  else if (context.playbookIndex?.length) sections.push({ title: "Playbooks", text: renderPlaybookIndex(context.playbookIndex) });
   if (context.apps.length > 0) sections.push({ title: "Connected apps", text: appsPrompt(context.apps) });
   if (context.botTools) sections.push({ title: "Bot tools", text: botToolsPrompt(bot.contactBots !== "off") });
   if (context.paseoTools) sections.push({ title: "Paseo tools", text: PASEO_TOOLS_PROMPT });

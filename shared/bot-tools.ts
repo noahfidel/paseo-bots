@@ -4,7 +4,7 @@
 
 export const TOOLS_MCP_NAME = "bots";
 
-const BOT_TOOL_NAMES = ["list_bots", "ask_bot", "check_chat", "search_chats", "get_setup", "propose_skill", "propose_routine", "propose_changes", "connect_app"] as const;
+const BOT_TOOL_NAMES = ["list_bots", "ask_bot", "check_chat", "search_chats", "get_playbook", "get_setup", "propose_skill", "propose_routine", "propose_changes", "connect_app"] as const;
 export type BotToolName = (typeof BOT_TOOL_NAMES)[number];
 
 /**
@@ -12,7 +12,7 @@ export type BotToolName = (typeof BOT_TOOL_NAMES)[number];
  * run without a permission prompt. Asking another bot is left to the bot's
  * "Contact other bots" setting.
  */
-export const QUIET_TOOLS: readonly BotToolName[] = ["list_bots", "check_chat", "search_chats", "get_setup", "propose_skill", "propose_routine", "propose_changes", "connect_app"];
+export const QUIET_TOOLS: readonly BotToolName[] = ["list_bots", "check_chat", "search_chats", "get_playbook", "get_setup", "propose_skill", "propose_routine", "propose_changes", "connect_app"];
 
 /**
  * The bot tool a timeline tool call is, whatever the provider calls it:
