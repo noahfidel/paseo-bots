@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { openBotChat, OPEN_CHAT_SCREEN_ID } from "../client/open-chat";
+import { openBotChat, OPEN_CHAT_SCREEN_ID, redirectAction } from "../client/open-chat";
 import { openBotSelection, takeIntent, type SurfaceIntent } from "../client/intent";
 import { BOT_LABEL, opensChatsInPaseo, type Bot, type Playbook } from "../shared/bot";
 import type { ChatApi } from "../shared/chat";
@@ -197,5 +197,16 @@ describe("New chat with <Bot> in the Command Center", () => {
 
   it("selects a chat that was already created when the Bots screen takes over", () => {
     expect(openBotSelection({ kind: "new-chat", botId: "bot-1", chatId: "agent-9" }, [{ id: "bot-1" }])).toEqual({ botId: "bot-1", chatId: "agent-9" });
+  });
+});
+
+describe("the redirect screen", () => {
+  it("opens the chat once, then steps back over itself on web or shows the Bots screen", () => {
+    const base = { agentId: "a", canNavigate: true, alreadyOpened: false, canGoBack: true };
+    expect(redirectAction(base)).toBe("open-agent");
+    expect(redirectAction({ ...base, alreadyOpened: true })).toBe("go-back");
+    expect(redirectAction({ ...base, alreadyOpened: true, canGoBack: false })).toBe("bots-screen");
+    expect(redirectAction({ ...base, canNavigate: false })).toBe("bots-screen");
+    expect(redirectAction({ ...base, agentId: "" })).toBe("bots-screen");
   });
 });

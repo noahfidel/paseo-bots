@@ -63,3 +63,17 @@ async function startAndOpen(botId: string, deps: OpenBotChatDeps): Promise<void>
   await started;
   clearTimeout(timer);
 }
+
+export type RedirectAction = "open-agent" | "go-back" | "bots-screen";
+
+/**
+ * What the redirect screen does when it mounts: open the chat in Paseo's chat view the
+ * first time; when shown again for that chat (Back from it), step back over itself where
+ * it can (web), else show the Bots screen with the chat selected. Without Paseo's
+ * navigation, or a chat, it shows the Bots screen.
+ */
+export function redirectAction({ agentId, canNavigate, alreadyOpened, canGoBack }: { agentId: string; canNavigate: boolean; alreadyOpened: boolean; canGoBack: boolean }): RedirectAction {
+  if (!agentId || !canNavigate) return "bots-screen";
+  if (!alreadyOpened) return "open-agent";
+  return canGoBack ? "go-back" : "bots-screen";
+}
