@@ -6,12 +6,14 @@ import { ProposalCard } from "./client/chat/stream/ProposalCard";
 import { RoutineRunCard } from "./client/chat/stream/RoutineRunCard";
 import { startBotItems } from "./client/bot-items";
 import { requestIntent } from "./client/intent";
+import { openBotChat, OPEN_CHAT_SCREEN_ID } from "./client/open-chat";
+import { OpenChatScreen } from "./client/OpenChatScreen";
 import { BotsSettings } from "./client/settings/BotsSettings";
 import { installTooltips } from "./client/ui/Tooltip";
 import { appSignIns } from "./shared/apps";
 import { BOT_LABEL } from "./shared/bot";
 import { proposalIdOf } from "./shared/proposals";
-import { APP_SIGN_IN_CARD, AppSignInSchema, botListRpc, helloRpc, ROUTINE_RUN_CARD, RoutineRunCardSchema } from "./shared/rpc";
+import { APP_SIGN_IN_CARD, AppSignInSchema, botListRpc, helloRpc, openChatRpc, ROUTINE_RUN_CARD, RoutineRunCardSchema } from "./shared/rpc";
 import { LEARN_COMMAND, learnPrompt } from "./shared/skills";
 import { schedulesAlertsRpc } from "./shared/schedules";
 import { startScheduleAlerts } from "./client/schedules/alerts";
@@ -71,12 +73,21 @@ export default function contribute(client: PluginClientContext) {
         icon: "Bot",
         keywords: item.keywords,
         context: "global",
-        onSelect({ openSurface }) {
-          requestIntent(item.intent);
-          openSurface("bots");
+        onSelect({ rpc, openScreen, openSurface }) {
+          // Straight into Paseo's chat view when the setting is on; otherwise, or when that fails, the Bots screen.
+          return openBotChat(item.intent.botId, {
+            start: (botId) => rpc(openChatRpc, { botId }),
+            openScreen,
+            openBots: (intent) => {
+              requestIntent(intent);
+              openSurface("bots");
+            },
+          });
         },
       }),
   });
+  // The blank screen those items open to hand a new chat to Paseo's chat view. No sidebar item or Command Center entry.
+  client.addScreen({ id: OPEN_CHAT_SCREEN_ID, title: "", Component: OpenChatScreen });
   // Bot chats opened in Paseo's own agent view get the same /learn and skill cards.
   client.addSlashCommand({
     ...LEARN_COMMAND,

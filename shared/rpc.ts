@@ -33,7 +33,20 @@ export const botListRpc = defineRpc({
   output: BotListSchema,
 });
 
-const PromptSectionSchema = z.object({ title: z.string(), text: z.string() });
+const OpenChatResultSchema = z.discriminatedUnion("kind", [z.object({ kind: z.literal("chat"), agentId: z.string() }), z.object({ kind: z.literal("bots-screen") })]);
+export type OpenChatResult = z.infer<typeof OpenChatResultSchema>;
+
+/**
+ * "New chat with <Bot>" from the Command Center: starts the bot's chat with no message
+ * for Paseo's chat view, or says to open the Bots screen (setting off, bot on another host or gone).
+ */
+export const openChatRpc = defineRpc({
+  name: "bots.open-chat",
+  input: z.object({ botId: BotId }),
+  output: OpenChatResultSchema,
+});
+
+const PromptSectionSchema =z.object({ title: z.string(), text: z.string() });
 
 /** The bot's system prompt as it would be sent now, with its memory and skills; `message` (a new chat's first) picks its playbooks. */
 export const systemPromptRpc = defineRpc({

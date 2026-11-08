@@ -299,6 +299,8 @@ export const botSettings = defineSettings({
     hideBotChats: z.boolean().optional(),
     /** The Schedules screen lists this host's launchd jobs. On when missing. */
     showLaunchdJobs: z.boolean().optional(),
+    /** "New chat with <Bot>" in the Command Center opens the chat in Paseo's own chat view. On when missing. */
+    openCommandChatsInPaseo: z.boolean().optional(),
   }),
   migrate: (values, fromVersion) => {
     let migrated = values;
@@ -308,6 +310,11 @@ export const botSettings = defineSettings({
   },
 });
 export type BotSettingsValues = z.infer<typeof botSettings.schema>;
+
+/** The "Open ⌘K bot chats in Paseo's chat view" setting, on unless turned off. */
+export function opensChatsInPaseo(values: Pick<BotSettingsValues, "openCommandChatsInPaseo">): boolean {
+  return values.openCommandChatsInPaseo !== false;
+}
 
 /** v1 kept `instructions` and `avatarSeed` flat. */
 export function migrateV1(values: unknown): unknown {

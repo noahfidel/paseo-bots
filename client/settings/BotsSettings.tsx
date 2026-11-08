@@ -3,7 +3,7 @@ import { useRpc } from "@getpaseo/plugin/client";
 import { copyText, useToast } from "@getpaseo/plugin/client/react-native";
 import { SettingsAction, SettingsCard, SettingsSection, SettingsSelect, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useState } from "react";
-import { DEFAULT_BOT_DEFAULTS, type Bot, type BotDefaults, type BotGroup } from "../../shared/bot";
+import { DEFAULT_BOT_DEFAULTS, opensChatsInPaseo, type Bot, type BotDefaults, type BotGroup } from "../../shared/bot";
 import { addImportedBots } from "../../shared/library";
 import { exportTeamRpc, importTeamRpc } from "../../shared/rpc";
 import { useBackgroundSupport, useBotHost, useProviders } from "../data";
@@ -30,6 +30,8 @@ export function BotsSettings({ theme, host }: PluginSurfaceProps) {
         host={host}
         hidden={values.hideBotChats === true}
         onChange={(hideBotChats) => void commit((current) => ({ ...current, hideBotChats }))}
+        openInPaseo={opensChatsInPaseo(values)}
+        onOpenInPaseoChange={(openCommandChatsInPaseo) => void commit((current) => ({ ...current, openCommandChatsInPaseo }))}
         colors={colors}
       />
       <SettingsSection title="All schedules" info="The All schedules screen lists bot routines, Paseo schedules and this host's launchd jobs.">
@@ -65,11 +67,28 @@ export function BotsSettings({ theme, host }: PluginSurfaceProps) {
   );
 }
 
-/** Whether bot chats stay out of Paseo's own sidebar; needs a host that has background workspaces. */
-function SidebarSection({ host, hidden, onChange, colors }: { host: PluginSurfaceProps["host"]; hidden: boolean; onChange(hidden: boolean): void; colors: Colors }) {
+/**
+ * Whether bot chats stay out of Paseo's own sidebar (needs a host that has background
+ * workspaces), and whether "New chat with <Bot>" in the Command Center opens Paseo's chat view.
+ */
+function SidebarSection({
+  host,
+  hidden,
+  onChange,
+  openInPaseo,
+  onOpenInPaseoChange,
+  colors,
+}: {
+  host: PluginSurfaceProps["host"];
+  hidden: boolean;
+  onChange(hidden: boolean): void;
+  openInPaseo: boolean;
+  onOpenInPaseoChange(open: boolean): void;
+  colors: Colors;
+}) {
   const unsupported = useBackgroundSupport(useBotHost(null, { id: host.id, label: host.label })).data === false;
   return (
-    <SettingsSection title="Paseo sidebar" info="Bot chats are still listed in the Bots screen.">
+    <SettingsSection title="Paseo" info="Bot chats are still listed in the Bots screen.">
       <SettingsCard>
         <SettingsSwitch
           label="Hide bot chats from Paseo's sidebar"
@@ -79,6 +98,12 @@ function SidebarSection({ host, hidden, onChange, colors }: { host: PluginSurfac
           onValueChange={onChange}
         />
         {unsupported ? <CardNote colors={colors} text="This host's Paseo is older than 0.13.2 and has no background workspaces, so bot chats stay in Paseo's sidebar. Update Paseo to use this setting." /> : null}
+        <SettingsSwitch
+          label="Open ⌘K bot chats in Paseo's chat view"
+          hint={'"New chat with <bot>" in the Command Center starts the chat and opens it in Paseo\'s own chat view. Off: it opens the Bots screen. Bots on another host always open the Bots screen.'}
+          value={openInPaseo}
+          onValueChange={onOpenInPaseoChange}
+        />
       </SettingsCard>
     </SettingsSection>
   );

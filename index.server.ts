@@ -13,6 +13,7 @@ import { probeMcpServer } from "./server/mcp-probe";
 import { generateAvatar, imageStatus, removeImageKey, setImageKey } from "./server/images";
 import { mcpSources } from "./server/mcp-sources";
 import { accounts, appTools, catalog, connect, disconnect, removeKey, renameAccount, setKey, status as appsStatus } from "./server/composio";
+import { openChat } from "./server/chats";
 import { BotsHost } from "./server/host";
 import { Relay } from "./server/relay";
 import { acceptProposal, dismissProposal, getProposal } from "./server/proposals";
@@ -60,6 +61,7 @@ import {
   memoryWriteRpc,
   mountRpc,
   mcpProbeRpc,
+  openChatRpc,
   mcpSourcesRpc,
   proposalAcceptRpc,
   proposalDismissRpc,
@@ -166,6 +168,10 @@ export default function contribute(server: PluginServerContext) {
   server.handle(appsDisconnectRpc, disconnect);
   server.handle(appsRenameRpc, renameAccount);
   server.handle(appsToolsRpc, appTools);
+  server.handle(openChatRpc, ({ botId }, context) => {
+    attach(context);
+    return openChat(host, relay, botId);
+  });
   server.handle(mountRpc, async ({ botId, agentId }) => {
     const bot = await host.bot(botId);
     return { tools: await relay.mountTools(botId, agentId), apps: bot?.apps.length ? await relay.mountApps(botId) : null };

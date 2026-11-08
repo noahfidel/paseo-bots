@@ -225,7 +225,11 @@ function BotsSurfaceContent({ theme, layout, host, navigation }: PluginSurfacePr
   useEffect(() => {
     attachSurface((intent) => {
       if (intent.kind === "new-bot") setCreating(true);
-      else setOpenIntent(intent);
+      else {
+        // The Command Center couldn't start the chat for Paseo's chat view; the new chat here can.
+        if (intent.error) toast.error(`Couldn't start the chat: ${errorText(intent.error)}`);
+        setOpenIntent(intent);
+      }
     });
   }, []);
 
