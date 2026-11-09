@@ -5,6 +5,7 @@ import { NativeConnectCard } from "./client/chat/stream/ConnectCard";
 import { ProposalCard } from "./client/chat/stream/ProposalCard";
 import { RoutineRunCard } from "./client/chat/stream/RoutineRunCard";
 import { installAvatarRegistry } from "./client/avatar-registry";
+import { installChatOpens } from "./client/chat-opens";
 import { startBotItems } from "./client/bot-items";
 import { requestIntent } from "./client/intent";
 import { openBotChat, OPEN_CHAT_SCREEN_ID } from "./client/open-chat";
@@ -92,6 +93,8 @@ export default function contribute(client: PluginClientContext) {
     fetch: async () => (await client.rpc(botListRpc, {})).bots,
     intervalMs: 60_000,
   });
+  // Chats the Bots screen shows, on globalThis.__paseoBotsChatOpens; see docs/chat-opens-api.md.
+  installChatOpens();
   // The blank screen those items open to hand a new chat to Paseo's chat view. No sidebar item or Command Center entry.
   // Paseo rejects a screen with an empty title, which would stop everything registered after it.
   client.addScreen({ id: OPEN_CHAT_SCREEN_ID, title: "Opening chat", Component: OpenChatScreen });

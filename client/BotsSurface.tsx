@@ -22,6 +22,7 @@ import { BotSidebar, type ChatMenuContext, type MenuSource, type Selection } fro
 import { ChatPane, type OutgoingMessage } from "./ChatPane";
 import { useBotHost, useChatInvalidation, useHostResolver, useProviders, type LocalHost } from "./data";
 import { attachSurface, openBotSelection, type SurfaceIntent } from "./intent";
+import { chatOpenToRecord, publishChatOpen } from "./chat-opens";
 import { LibraryView } from "./library/LibraryView";
 import { onLibraryTarget, type LibraryTarget } from "./navigation";
 import { Splash } from "./Splash";
@@ -804,6 +805,17 @@ function SelectedChat({ colors, bot, library, hideFromSidebar, selection, localH
     await queryClient.invalidateQueries({ queryKey: ["paseo-bots", "chats", host.key, bot.id] });
     onStarted(id);
   };
+
+  // SelectedChat is keyed by bot and chat, so each shown chat mounts once; record it once its workspace is known.
+  const recorded = useRef(false);
+  const workspaceId = chat.agent?.workspaceId;
+  useEffect(() => {
+    if (recorded.current) return;
+    const open = chatOpenToRecord({ serverId: host.key, chatId: selection.chatId, workspaceId, now: Date.now() });
+    if (!open) return;
+    recorded.current = true;
+    publishChatOpen(open);
+  }, [host.key, selection.chatId, workspaceId]);
 
   // Keep the bot's workspace named after the bot.
   useEffect(() => {
