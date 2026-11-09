@@ -141,6 +141,47 @@ describe("memory journal, daily log and search_chats", () => {
     expect((await journal.list("bot-j")).filter((entry) => entry.via === "undo")).toHaveLength(2);
   });
 
+  it("reads a routine run's reply from Paseo, since turn_ended's timeline is always empty", async () => {
+    const { turnEnded } = await import("../server/activity");
+    const { MemoryJournal } = await import("../server/journal");
+    const host = fakeHost([makeBot({ id: "bot-r", name: "Clerk" })]);
+    host.chatOf = async () => ({ botId: "bot-r", title: "Calendar refresh", routineId: "rt-r", labels: {} });
+    const calls: unknown[][] = [];
+    const scheduler = { finished: async (...args: unknown[]) => void calls.push(args) };
+    const agent = { id: newUuid(), workspaceId: null, parentAgentId: null, provider: "claude", cwd: "/", title: null };
+    // The real shape of the agent's timeline when the turn ends (run-04d04d26).
+    const entries = [
+      { item: { type: "user_message", text: "Refresh Noah's live calendar artifact." }, timestamp: "2026-11-09T12:20:04.541Z" },
+      { item: { type: "tool_call", name: "Bash", callId: "1", status: "completed" }, timestamp: "2026-11-09T12:20:12.693Z" },
+      { item: { type: "tool_call", name: "task_notification", callId: "2", status: "completed" }, timestamp: "2026-11-09T12:20:27.892Z" },
+      { item: { type: "assistant_message", text: "Synced 13 events for the week of Nov 9." }, timestamp: "2026-11-09T12:20:37.946Z" },
+    ];
+    let fail = false;
+    const fetched: unknown[] = [];
+    host.attach({
+      agents: {
+        ref: (id: string) => ({
+          timeline: {
+            refetch: async (options: unknown) => {
+              if (fail) throw new Error("daemon went away");
+              fetched.push([id, options]);
+              return { entries };
+            },
+          },
+        }),
+      },
+    } as never);
+
+    await turnEnded(host, new MemoryJournal(), scheduler, { agent, turnId: "t1", outcome: { kind: "completed" }, timeline: [] });
+    expect(fetched[0]).toEqual([agent.id, expect.objectContaining({ direction: "tail" })]);
+    expect(calls[0]).toEqual(["rt-r", agent.id, { kind: "completed" }, "Synced 13 events for the week of Nov 9.", null]);
+
+    // A chat whose timeline can't be read isn't judged on its reply.
+    fail = true;
+    await turnEnded(host, new MemoryJournal(), scheduler, { agent, turnId: "t2", outcome: { kind: "completed" }, timeline: [] });
+    expect(calls[1]).toEqual(["rt-r", agent.id, { kind: "completed" }, null, null]);
+  });
+
   it("logs finished turns of bot chats and searches chats and memory", async () => {
     const { turnEnded } = await import("../server/activity");
     const { MemoryJournal } = await import("../server/journal");
@@ -152,14 +193,15 @@ describe("memory journal, daily log and search_chats", () => {
     const journal = new MemoryJournal();
     const agent = { id: newUuid(), workspaceId: null, parentAgentId: null, provider: "claude", cwd: "/", title: null };
 
-    const timeline = [
+    const turn = [
       { type: "user_message", text: "Send the Q3 invoices" },
       { type: "tool_call", name: "mcp__apps__GMAIL_SEND", callId: "1", status: "completed", detail: { type: "unknown", input: null, output: null }, error: null },
       { type: "assistant_message", text: "Sent the three Q3 invoices to Acme." },
-    ] as never;
-    await turnEnded(host, journal, scheduler, { agent, turnId: "t1", outcome: { kind: "completed" }, timeline });
-    await turnEnded(host, journal, scheduler, { agent: { ...agent, id: "other-agent" }, turnId: "t2", outcome: { kind: "completed" }, timeline });
-    await turnEnded(host, journal, scheduler, { agent, turnId: "t3", outcome: { kind: "canceled", reason: "stopped" }, timeline });
+    ];
+    host.attach({ agents: { ref: () => ({ timeline: { refetch: async () => ({ entries: turn.map((item) => ({ item, timestamp: new Date().toISOString() })) }) } }) } } as never);
+    await turnEnded(host, journal, scheduler, { agent, turnId: "t1", outcome: { kind: "completed" }, timeline: [] });
+    await turnEnded(host, journal, scheduler, { agent: { ...agent, id: "other-agent" }, turnId: "t2", outcome: { kind: "completed" }, timeline: [] });
+    await turnEnded(host, journal, scheduler, { agent, turnId: "t3", outcome: { kind: "canceled", reason: "stopped" }, timeline: [] });
     expect((await listLogDays("bot-s")).days).toEqual([{ day: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), lines: 1 }]);
     const [entry] = await recentLogEntries("bot-s", 1);
     expect(entry).toMatchObject({ chat: "Invoices", text: "Sent the three Q3 invoices to Acme. [tools: apps/GMAIL_SEND]" });

@@ -130,17 +130,20 @@ describe("the routine scheduler", () => {
     let started = 0;
     (scheduler as unknown as { newChat: () => Promise<string> }).newChat = async () => `fail-chat-${++started}`;
     try {
-      for (let i = 0; i < 4; i++) await scheduler.runNow("bot-f", "rt-f");
+      for (let i = 0; i < 5; i++) await scheduler.runNow("bot-f", "rt-f");
       await scheduler.finished("rt-f", "fail-chat-1", { kind: "completed" }, "  \n ");
       await scheduler.finished("rt-f", "fail-chat-2", { kind: "completed" }, "API Error: 529 overloaded", "API Error: 529 overloaded");
       await scheduler.finished("rt-f", "fail-chat-3", { kind: "completed" }, "x", `Boom ${"y".repeat(600)}`);
       await scheduler.finished("rt-f", "fail-chat-4", { kind: "completed" }, "All done.", null);
+      // The reply couldn't be read: the outcome decides.
+      await scheduler.finished("rt-f", "fail-chat-5", { kind: "completed" }, null, null);
       const runs = (await scheduler.status()).routines["rt-f"]!.runs;
-      expect(runs.map((run) => [run.agentId, run.status])).toEqual([["fail-chat-1", "failed"], ["fail-chat-2", "failed"], ["fail-chat-3", "failed"], ["fail-chat-4", "succeeded"]]);
+      expect(runs.map((run) => [run.agentId, run.status])).toEqual([["fail-chat-1", "failed"], ["fail-chat-2", "failed"], ["fail-chat-3", "failed"], ["fail-chat-4", "succeeded"], ["fail-chat-5", "succeeded"]]);
       expect(runs[0]!.error).toBe("Finished without a reply.");
       expect(runs[1]!.error).toBe("API Error: 529 overloaded");
       expect(runs[2]!.error!.length).toBeLessThanOrEqual(300);
       expect(runs[3]!.error).toBeNull();
+      expect(runs[4]).toMatchObject({ error: null, output: null });
     } finally {
       relay.stop();
     }

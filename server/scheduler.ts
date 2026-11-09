@@ -165,8 +165,8 @@ export class RoutineScheduler {
     return { url: `http://127.0.0.1:${port}/hooks/${routineId}/${hooks[routineId]}` };
   }
 
-  /** A routine chat's turn ended: record how its run went and update the run's card. */
-  async finished(routineId: string, agentId: string, outcome: PluginTurnOutcome, reply: string, turnError: string | null = null): Promise<void> {
+  /** A routine chat's turn ended: record how its run went and update the run's card. A null reply means the chat couldn't be read, so the outcome alone decides. */
+  async finished(routineId: string, agentId: string, outcome: PluginTurnOutcome, reply: string | null, turnError: string | null = null): Promise<void> {
     const waiting = (record: RoutineRecord | undefined) => [...(record?.runs ?? [])].reverse().find((entry) => entry.agentId === agentId && entry.status === "running");
     // Later turns in a run's chat are just chatting; only the run's own turn counts.
     if (!waiting((await this.status()).routines[routineId])) return;
@@ -174,11 +174,11 @@ export class RoutineScheduler {
       const found = waiting(records[routineId]);
       if (!found) return null;
       // A turn can "complete" and still have produced nothing, or only a provider error.
-      const emptyOrErrored = outcome.kind === "completed" ? (turnError ? foldText(turnError, 300) : !reply.trim() ? "Finished without a reply." : null) : null;
+      const emptyOrErrored = outcome.kind === "completed" ? (turnError ? foldText(turnError, 300) : reply !== null && !reply.trim() ? "Finished without a reply." : null) : null;
       Object.assign(found, {
         endedAt: new Date().toISOString(),
         status: outcome.kind === "completed" && !emptyOrErrored ? "succeeded" : "failed",
-        output: reply.trim() ? foldText(reply, 400) : null,
+        output: reply?.trim() ? foldText(reply, 400) : null,
         error: emptyOrErrored ?? (outcome.kind === "failed" ? outcome.error.message : outcome.kind === "canceled" ? "Stopped before it finished." : null),
       });
       return { ...found };
