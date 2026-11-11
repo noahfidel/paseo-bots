@@ -24,12 +24,13 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function routineItems(values: BotSettingsValues | null, records: Record<string, RoutineRecord>, now: Date): ScheduleItem[] {
+/** Every routine of every local bot; `timedOnly` leaves out the ones that only run when their webhook is called (they're alerted on, not listed). */
+export function routineItems(values: BotSettingsValues | null, records: Record<string, RoutineRecord>, now: Date, options: { timedOnly?: boolean } = {}): ScheduleItem[] {
   if (!values) return [];
   return values.bots
     .filter((bot) => !bot.archived && !bot.hostId)
     .flatMap((bot) =>
-      bot.routines.map((routine): ScheduleItem => {
+      bot.routines.filter((routine) => !options.timedOnly || routine.schedule.kind !== "webhook").map((routine): ScheduleItem => {
         const record = records[routine.id];
         const run = record?.runs.at(-1) ?? null;
         const status: LastRun["status"] | null = run ? (run.status === "skipped-busy" || run.status === "skipped-missed" ? "skipped" : run.status) : null;
@@ -102,7 +103,7 @@ export class Schedules {
       shown ? this.deps.launchd.list().then((jobs) => ({ jobs, error: null }), (error: unknown) => ({ jobs: [] as LaunchdJob[], error: message(error) })) : { jobs: [] as LaunchdJob[], error: null },
       this.deps.paseo.list().then((schedules) => ({ schedules, error: null }), (error: unknown) => ({ schedules: [], error: message(error) })),
     ]);
-    const items = [...routineItems(values, records, now), ...launchd.jobs.map((job) => launchdItem(job, now)), ...paseo.schedules.map(paseoItem)];
+    const items = [...routineItems(values, records, now, { timedOnly: true }), ...launchd.jobs.map((job) => launchdItem(job, now)), ...paseo.schedules.map(paseoItem)];
     items.sort((a, b) => ORDER[a.kind] - ORDER[b.kind] || a.name.localeCompare(b.name));
     return { items, launchd: { supported: this.deps.launchd.supported, shown, error: launchd.error }, paseo: { error: paseo.error } };
   }

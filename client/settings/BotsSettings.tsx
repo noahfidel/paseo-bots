@@ -34,7 +34,7 @@ export function BotsSettings({ theme, host }: PluginSurfaceProps) {
         onOpenInPaseoChange={(openCommandChatsInPaseo) => void commit((current) => ({ ...current, openCommandChatsInPaseo }))}
         colors={colors}
       />
-      <SettingsSection title="All schedules" info="The All schedules screen lists bot routines, Paseo schedules and this host's launchd jobs.">
+      <SettingsSection title="All schedules" info="The All schedules screen lists scheduled bot routines (not webhook-triggered ones), Paseo schedules and this host's launchd jobs.">
         <SettingsCard>
           <SettingsSwitch
             label="Show launchd jobs"
