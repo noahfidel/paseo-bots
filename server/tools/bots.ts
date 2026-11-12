@@ -2,6 +2,7 @@ import type { PaseoApi } from "../paseo";
 import { z } from "zod";
 import { foldText, lastTurn } from "../../shared/activity";
 import { BOT_LABEL } from "../../shared/bot";
+import { ASKED_BY_LABEL, askState } from "../../shared/bot-tools";
 import { startChat } from "../chats";
 import { defineTool, type ToolCaller } from "./mcp";
 
@@ -23,8 +24,7 @@ export const listBots = defineTool({
   },
 });
 
-/** Label on a chat started by another bot's ask_bot, carrying the asking bot's id. */
-export const ASKED_BY_LABEL = "paseo-bots.asked-by";
+export { ASKED_BY_LABEL };
 /** MCP clients give up on a tool call after about a minute (Codex after 60 seconds), so answers are awaited a little less. */
 const ASK_WAIT_MS = 50_000;
 const REPLY_MAX = 8_000;
@@ -71,9 +71,9 @@ function describeChat(chat: ChatState, who: string, chatId: string): string {
 
 /** Bots answering another bot don't ask further, so requests can't loop. */
 async function mayAsk({ bot, agentId, host }: ToolCaller): Promise<boolean> {
-  if (bot.contactBots === "off") return false;
+  if (askState(bot.contactBots) === "off") return false;
   const chat = await host.chatOf(agentId);
-  return !chat?.labels[ASKED_BY_LABEL];
+  return askState(bot.contactBots, chat?.labels) === "ask";
 }
 
 export const askBot = defineTool({

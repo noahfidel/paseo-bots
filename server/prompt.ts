@@ -38,6 +38,8 @@ export interface ChatStart {
   indexPlaybooks?: boolean;
   /** The bot's team and every bot, when it's on one. */
   team?: { group: BotGroup; bots: Bot[] };
+  /** The labels the chat is started with (Paseo keeps the prompt they shaped when the chat resumes). */
+  labels?: Record<string, string>;
 }
 
 /**
@@ -69,6 +71,7 @@ export async function promptContext(bot: Bot, local: boolean, library: Library, 
     skills: skills.map((skill) => ({ name: skill.id, description: skill.description, path: paths.get(skill.id)! })),
     paseoTools,
     botTools: true,
+    ...(start.labels ? { labels: start.labels } : {}),
     apps: await botApps(bot),
   };
 }
@@ -86,7 +89,7 @@ async function paseoToolsOn(paseo: PaseoApi | null, provider: string): Promise<b
 
 /** The system prompt for a new chat; `settings` supplies the bot's team. */
 export async function systemPrompt(
-  { bot, local, message, indexPlaybooks }: { bot: Bot; local: boolean; message?: string; indexPlaybooks?: boolean },
+  { bot, local, message, indexPlaybooks, labels }: { bot: Bot; local: boolean; message?: string; indexPlaybooks?: boolean; labels?: Record<string, string> },
   library: Library,
   paseo: PaseoApi | null,
   settings?: BotSettingsValues | null,
@@ -96,6 +99,7 @@ export async function systemPrompt(
     ...(message !== undefined ? { message } : {}),
     ...(indexPlaybooks ? { indexPlaybooks } : {}),
     ...(group && settings ? { team: { group, bots: settings.bots } } : {}),
+    ...(labels ? { labels } : {}),
   };
   // Another host's config isn't readable from here; Paseo gives agents its tools by default.
   const context = await promptContext(bot, local, library, local ? await paseoToolsOn(paseo, bot.provider) : true, start);

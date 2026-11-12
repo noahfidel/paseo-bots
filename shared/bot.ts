@@ -1,7 +1,7 @@
 import { defineSettings } from "@getpaseo/plugin";
 import { z } from "zod";
 import { APPS_MCP_NAME, appsPrompt, type PromptApp } from "./apps";
-import { botToolsPrompt, QUIET_TOOLS, supportsToolGrants, TOOLS_MCP_NAME } from "./bot-tools";
+import { askState, botToolsPrompt, QUIET_TOOLS, supportsToolGrants, TOOLS_MCP_NAME } from "./bot-tools";
 import { PASEO_MCP_NAME, PASEO_TOOLS_PROMPT } from "./paseo-tools";
 import { renderPlaybookIndex, renderPlaybooks } from "./playbooks";
 
@@ -468,6 +468,8 @@ export interface PromptContext {
   paseoTools: boolean;
   /** Whether chats get the plugin's own tools (bots on the plugin's host). */
   botTools: boolean;
+  /** The labels the chat is started with; a chat another bot asked can't ask others. */
+  labels?: Record<string, string>;
   /** The connected apps the bot may use; empty when it has none. */
   apps: PromptApp[];
 }
@@ -517,7 +519,7 @@ export function promptSections(bot: Bot, context: PromptContext): PromptSection[
   if (context.playbooks.length > 0) sections.push({ title: "Playbooks", text: renderPlaybooks(context.playbooks) });
   else if (context.playbookIndex?.length) sections.push({ title: "Playbooks", text: renderPlaybookIndex(context.playbookIndex) });
   if (context.apps.length > 0) sections.push({ title: "Connected apps", text: appsPrompt(context.apps) });
-  if (context.botTools) sections.push({ title: "Bot tools", text: botToolsPrompt(bot.contactBots !== "off") });
+  if (context.botTools) sections.push({ title: "Bot tools", text: botToolsPrompt(askState(bot.contactBots, context.labels)) });
   if (context.paseoTools) sections.push({ title: "Paseo tools", text: PASEO_TOOLS_PROMPT });
   return sections;
 }

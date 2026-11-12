@@ -20,7 +20,7 @@ export async function startChat(host: BotsHost, relay: Relay, bot: Bot, input: {
   const home = await ensureBotHome({ botId: bot.id });
   const values = await host.values();
   const { systemPrompt: system } = await systemPrompt(
-    input.prompt === undefined ? { bot, local: true, indexPlaybooks: true } : { bot, local: true, message: input.prompt },
+    { bot, local: true, ...(input.prompt === undefined ? { indexPlaybooks: true } : { message: input.prompt }), ...(input.labels ? { labels: input.labels } : {}) },
     library,
     paseo,
     values,
